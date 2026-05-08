@@ -163,12 +163,20 @@ def recalculate(m, today):
         if latest > current_last:
             m['last_event_date'] = str(latest)
 
-    # Focus dept white zone: score=0 but check 60-day memory
+    # Focus dept white zone: score=0 but check 60-day memory.
+    # Empty last_event_date means no events ever recorded -> WHITE immediately.
+    # parse_event_date('') falls back to today (bug) so we check explicitly first.
     if zona == 'green' and m.get('focus_dept'):
-        last_ev = parse_event_date(m.get('last_event_date','2000-01-01'))
-        if (today - last_ev).days > WHITE_WINDOW_DAYS:
+        last_ev_str = m.get('last_event_date', '')
+        if not last_ev_str:
+            # No events ever recorded for this municipality -> WHITE
             zona = 'white'
             m['sc'] = "Sin eventos verificados en 60+ dias | BLANCO"
+        else:
+            last_ev = parse_event_date(last_ev_str)
+            if (today - last_ev).days > WHITE_WINDOW_DAYS:
+                zona = 'white'
+                m['sc'] = "Sin eventos verificados en 60+ dias | BLANCO"
 
     m['r'] = zona
     return m
