@@ -170,7 +170,7 @@ def fetch_data() -> dict:
 
     print("Buscando inteligencia de conflicto reciente...")
     resp = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=8000,
         system=SYSTEM_PROMPT,
         messages=[{"role":"user","content":prompt}],
