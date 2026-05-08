@@ -57,7 +57,11 @@ def run():
         sys.exit(1)
 
     clean = re.sub(r'^```(?:json)?\s*','',text.strip())
-    clean = re.sub(r'\s*```$','',clean)
+clean = re.sub(r'\s*```$','',clean)
+json_start = clean.find('{')
+json_end = clean.rfind('}')
+if json_start != -1 and json_end != -1:
+    clean = clean[json_start:json_end+1]
 
     try:
         data = json.loads(clean)
