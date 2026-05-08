@@ -18,7 +18,9 @@ EMAIL_TO    = os.environ.get("EMAIL_TO", "")
 MAP_URL     = os.environ.get("MAP_URL", "https://bcorreia-coh.github.io/colombia-risk-map/")
 MESES       = {1:'ene',2:'feb',3:'mar',4:'abr',5:'may',6:'jun',
                7:'jul',8:'ago',9:'sep',10:'oct',11:'nov',12:'dic'}
-EVENT_WINDOW_DAYS = 30
+EVENT_WINDOW_DAYS  = 30   # events older than this expire from score
+WHITE_WINDOW_DAYS  = 60   # focus dept municipalities older than this = WHITE
+FOCUS_DEPTS = {'cauca','valle del cauca','narino','nariño'}
 
 # Rubrica CoH Seccion 3
 def get_multiplier(n):
@@ -154,6 +156,20 @@ def recalculate(m, today):
             zona = 'yellow'
             m['sc'] = f"Gravedad:{sev}pts x{mult} = {adj} | AMARILLO (depto. no restringido)"
 
+    # Track last event date (never decreases)
+    if active_events:
+        latest = max(parse_event_date(e.get('date','')) for e in active_events)
+        current_last = parse_event_date(m.get('last_event_date','2000-01-01'))
+        if latest > current_last:
+            m['last_event_date'] = str(latest)
+
+    # Focus dept white zone: score=0 but check 60-day memory
+    if zona == 'green' and m.get('focus_dept'):
+        last_ev = parse_event_date(m.get('last_event_date','2000-01-01'))
+        if (today - last_ev).days > WHITE_WINDOW_DAYS:
+            zona = 'white'
+            m['sc'] = "Sin eventos verificados en 60+ dias | BLANCO"
+
     m['r'] = zona
     return m
 
@@ -198,8 +214,156 @@ def make_green(m, today):
         "events":[],"sc":"Puntaje ajustado: 0 | VERDE",
         "i":"Sin incidentes de conflicto armado verificados en los ultimos 30 dias.",
         "a":"N/A - monitoreo rutinario",
-        "auto_red":False,"auto_red_why":"","auto_red_date":"","next_expiry":""
+        "auto_red":False,"auto_red_why":"","auto_red_date":"","next_expiry":"",
+        "last_event_date":""
     }
+
+def make_focus_muni(m, today):
+    """Seed a focus-department municipality (Cauca/Valle/Narino) as WHITE."""
+    return {
+        "n":m["n"],"d":m["d"],"lat":m["lat"],"lng":m["lng"],
+        "r":"white","sz":8,"adjusted_score":0,"ev_count":0,
+        "events":[],"sc":"Sin eventos verificados en 60+ dias | BLANCO",
+        "i":"Sin incidentes verificados en los ultimos 60 dias. Zona de presencia historica de grupos armados.",
+        "a":m.get("a","Presencia historica de grupos armados ilegales"),
+        "auto_red":False,"auto_red_why":"","auto_red_date":"","next_expiry":"",
+        "last_event_date":"","focus_dept":True
+    }
+
+# All municipalities in the three focus departments with known criminal structures
+FOCUS_MUNICIPALITIES = [
+  # ── CAUCA ──────────────────────────────────────────────────────────
+  {"n":"Caloto",              "d":"Cauca","lat":3.0236,"lng":-76.4208,"a":"FARC-EMC Frente Dagoberto Ramos"},
+  {"n":"Toribio",             "d":"Cauca","lat":3.0000,"lng":-76.0900,"a":"FARC-EMC Frente Dagoberto Ramos — resguardos Nasa"},
+  {"n":"Miranda",             "d":"Cauca","lat":3.2453,"lng":-76.2267,"a":"FARC-EMC Frente Dagoberto Ramos"},
+  {"n":"Corinto",             "d":"Cauca","lat":3.1783,"lng":-76.2556,"a":"FARC-EMC Frente Dagoberto Ramos"},
+  {"n":"Jambalo",             "d":"Cauca","lat":2.8700,"lng":-76.1300,"a":"FARC-EMC Frente Dagoberto Ramos — resguardo Nasa"},
+  {"n":"Guachene",            "d":"Cauca","lat":3.0869,"lng":-76.4333,"a":"FARC-EMC Frente Dagoberto Ramos"},
+  {"n":"Puerto Tejada",       "d":"Cauca","lat":3.2311,"lng":-76.4153,"a":"FARC-EMC / redes criminales urbanas"},
+  {"n":"Villa Rica",          "d":"Cauca","lat":3.1700,"lng":-76.4600,"a":"FARC-EMC / redes criminales"},
+  {"n":"Padilla",             "d":"Cauca","lat":3.1900,"lng":-76.3100,"a":"Redes criminales — corredor Norte Cauca"},
+  {"n":"Santander de Quilichao","d":"Cauca","lat":3.0072,"lng":-76.4847,"a":"FARC-EMC multiples frentes — nodo urbano Norte Cauca"},
+  {"n":"Cajibio",             "d":"Cauca","lat":2.5500,"lng":-76.5578,"a":"FARC-EMC Frente Jaime Martinez / alias Ivan Mordisco"},
+  {"n":"Morales",             "d":"Cauca","lat":2.7544,"lng":-76.6206,"a":"FARC-EMC Frente Jaime Martinez"},
+  {"n":"El Tambo",            "d":"Cauca","lat":2.4578,"lng":-76.8003,"a":"FARC-EMC Frente Jaime Martinez — corredor Panamericana"},
+  {"n":"Buenos Aires",        "d":"Cauca","lat":3.0167,"lng":-76.6333,"a":"FARC-EMC Frente Jaime Martinez"},
+  {"n":"Suarez",              "d":"Cauca","lat":2.9503,"lng":-76.6611,"a":"FARC-EMC Frente Jaime Martinez"},
+  {"n":"Piendamo",            "d":"Cauca","lat":2.6700,"lng":-76.5300,"a":"FARC-EMC Frente Jaime Martinez"},
+  {"n":"Timbio",              "d":"Cauca","lat":2.3461,"lng":-76.6822,"a":"FARC-EMC Frente Jaime Martinez"},
+  {"n":"Popayan",             "d":"Cauca","lat":2.4419,"lng":-76.6072,"a":"FARC-EMC zona de influencia — ciudad capital excluida de restriccion extranjeros"},
+  {"n":"Silvia",              "d":"Cauca","lat":2.6156,"lng":-76.3817,"a":"FARC-EMC Frente Dagoberto Ramos — territorio indigena Nasa/Misak"},
+  {"n":"Caldono",             "d":"Cauca","lat":2.7967,"lng":-76.4883,"a":"FARC-EMC Frente Dagoberto Ramos"},
+  {"n":"Patia",               "d":"Cauca","lat":2.0697,"lng":-77.0731,"a":"FARC-EMC Frente Jaime Martinez — El Bordo"},
+  {"n":"Mercaderes",          "d":"Cauca","lat":1.7944,"lng":-77.1878,"a":"FARC-EMC Frente 6"},
+  {"n":"Balboa",              "d":"Cauca","lat":2.0536,"lng":-77.2178,"a":"FARC-EMC Frente 6"},
+  {"n":"La Sierra",           "d":"Cauca","lat":1.9100,"lng":-76.9500,"a":"FARC-EMC Frente 6"},
+  {"n":"Rosas",               "d":"Cauca","lat":2.2600,"lng":-76.7200,"a":"FARC-EMC Frente Jaime Martinez / Frente 6"},
+  {"n":"Argelia",             "d":"Cauca","lat":1.8800,"lng":-77.2300,"a":"FARC-EMC Frente 6 / Segunda Marquetalia"},
+  {"n":"Almaguer",            "d":"Cauca","lat":1.9167,"lng":-76.8333,"a":"FARC-EMC Frente 6"},
+  {"n":"Bolivar (Cauca)",     "d":"Cauca","lat":1.8611,"lng":-76.9611,"a":"FARC-EMC Frente 6"},
+  {"n":"San Sebastian",       "d":"Cauca","lat":1.7800,"lng":-76.8100,"a":"FARC-EMC Frente 6"},
+  {"n":"Santa Rosa (Cauca)",  "d":"Cauca","lat":1.6700,"lng":-76.7900,"a":"FARC-EMC Frente 6"},
+  {"n":"Sotara",              "d":"Cauca","lat":2.1700,"lng":-76.6300,"a":"FARC-EMC Frente Jaime Martinez / Frente 6"},
+  {"n":"Sucre (Cauca)",       "d":"Cauca","lat":1.9600,"lng":-76.9700,"a":"FARC-EMC Frente 6"},
+  {"n":"La Vega",             "d":"Cauca","lat":1.9700,"lng":-76.7700,"a":"FARC-EMC Frente 6"},
+  {"n":"Purace",              "d":"Cauca","lat":2.2600,"lng":-76.4900,"a":"FARC-EMC (influencia)"},
+  {"n":"Totoro",              "d":"Cauca","lat":2.5000,"lng":-76.4000,"a":"FARC-EMC Frente Dagoberto Ramos"},
+  {"n":"Inza",                "d":"Cauca","lat":2.5700,"lng":-76.0700,"a":"FARC-EMC Frente Dagoberto Ramos — resguardo Nasa"},
+  {"n":"Paez",                "d":"Cauca","lat":2.9000,"lng":-75.8800,"a":"FARC-EMC / ELN — territorio indigena Nasa — Tierradentro"},
+  {"n":"Lopez de Micay",      "d":"Cauca","lat":3.1889,"lng":-77.2444,"a":"FARC-EMC Frente Jaime Martinez — Canion del Micay"},
+  {"n":"Timbiqui",            "d":"Cauca","lat":2.7700,"lng":-77.6800,"a":"FARC-EMC Segunda Marquetalia — costa Pacifica"},
+  {"n":"Guapi",               "d":"Cauca","lat":2.5700,"lng":-77.8900,"a":"FARC-EMC Segunda Marquetalia — costa Pacifica"},
+  {"n":"Piamonte",            "d":"Cauca","lat":0.8500,"lng":-76.5800,"a":"FARC-EMC Frente 48 — frontera Putumayo"},
+  {"n":"Florencia (Cauca)",   "d":"Cauca","lat":1.6067,"lng":-76.6133,"a":"FARC-EMC Frente 6"},
+  # ── VALLE DEL CAUCA ───────────────────────────────────────────────
+  {"n":"Buenaventura",        "d":"Valle del Cauca","lat":3.8831,"lng":-77.0311,"a":"FARC-EMC / AGC Clan del Golfo / redes criminales — principal puerto del Pacifico"},
+  {"n":"Dagua",               "d":"Valle del Cauca","lat":3.6594,"lng":-76.6944,"a":"FARC-EMC Frente Jaime Martinez — corredor Buenaventura"},
+  {"n":"Jamundi",             "d":"Valle del Cauca","lat":3.2578,"lng":-76.5369,"a":"FARC-EMC Frente Jaime Martinez"},
+  {"n":"Pradera",             "d":"Valle del Cauca","lat":3.4239,"lng":-76.2406,"a":"FARC-EMC Frente Andes / Segunda Marquetalia"},
+  {"n":"Florida (Valle)",     "d":"Valle del Cauca","lat":3.3272,"lng":-76.2311,"a":"FARC-EMC Frente Andes / Segunda Marquetalia"},
+  {"n":"Cali",                "d":"Valle del Cauca","lat":3.4516,"lng":-76.5320,"a":"FARC-EMC influencia — ciudad excluida de restriccion extranjeros"},
+  {"n":"Palmira",             "d":"Valle del Cauca","lat":3.5394,"lng":-76.2983,"a":"FARC-EMC influencia — ciudad excluida de restriccion extranjeros"},
+  {"n":"Yumbo",               "d":"Valle del Cauca","lat":3.5836,"lng":-76.4942,"a":"FARC-EMC / redes criminales"},
+  {"n":"Candelaria",          "d":"Valle del Cauca","lat":3.4089,"lng":-76.3461,"a":"Redes criminales / FARC-EMC"},
+  {"n":"El Cerrito",          "d":"Valle del Cauca","lat":3.6794,"lng":-76.1450,"a":"Redes criminales"},
+  {"n":"Ginebra",             "d":"Valle del Cauca","lat":3.7311,"lng":-76.0644,"a":"Redes criminales"},
+  {"n":"Guacari",             "d":"Valle del Cauca","lat":3.7789,"lng":-76.3275,"a":"Redes criminales"},
+  {"n":"Buga",                "d":"Valle del Cauca","lat":3.9011,"lng":-76.2964,"a":"Redes criminales — influencia FARC-EMC"},
+  {"n":"Tulua",               "d":"Valle del Cauca","lat":4.0867,"lng":-76.1972,"a":"Redes criminales / AGC Clan del Golfo"},
+  {"n":"Cartago",             "d":"Valle del Cauca","lat":4.7467,"lng":-75.9122,"a":"AGC Clan del Golfo / redes criminales — Norte del Valle"},
+  {"n":"Sevilla",             "d":"Valle del Cauca","lat":4.2681,"lng":-75.9347,"a":"Redes criminales"},
+  {"n":"Caicedonia",          "d":"Valle del Cauca","lat":4.3339,"lng":-75.8331,"a":"Redes criminales"},
+  {"n":"Zarzal",              "d":"Valle del Cauca","lat":4.3942,"lng":-76.0708,"a":"AGC / redes criminales"},
+  {"n":"La Union (Valle)",    "d":"Valle del Cauca","lat":4.5300,"lng":-76.1000,"a":"Redes criminales"},
+  {"n":"Roldanillo",          "d":"Valle del Cauca","lat":4.4150,"lng":-76.1569,"a":"AGC Clan del Golfo / redes criminales"},
+  {"n":"Toro",                "d":"Valle del Cauca","lat":4.6020,"lng":-76.0820,"a":"AGC Clan del Golfo / FARC-EMC Frente Jaime Martinez"},
+  {"n":"Versalles",           "d":"Valle del Cauca","lat":4.5700,"lng":-76.2400,"a":"FARC-EMC / redes criminales"},
+  {"n":"La Cumbre",           "d":"Valle del Cauca","lat":3.6500,"lng":-76.5700,"a":"FARC-EMC Frente Jaime Martinez — corredor montanas"},
+  {"n":"Restrepo",            "d":"Valle del Cauca","lat":3.8214,"lng":-76.5228,"a":"Redes criminales"},
+  {"n":"Calima",              "d":"Valle del Cauca","lat":3.9300,"lng":-76.4800,"a":"FARC-EMC / redes criminales"},
+  {"n":"Riofrio",             "d":"Valle del Cauca","lat":4.1200,"lng":-76.3600,"a":"FARC-EMC / redes criminales"},
+  {"n":"Trujillo",            "d":"Valle del Cauca","lat":4.2300,"lng":-76.3200,"a":"FARC-EMC / redes criminales"},
+  {"n":"Bolivar (Valle)",     "d":"Valle del Cauca","lat":4.3700,"lng":-76.2300,"a":"FARC-EMC Segunda Marquetalia"},
+  {"n":"El Dovio",            "d":"Valle del Cauca","lat":4.5200,"lng":-76.2900,"a":"FARC-EMC / redes criminales"},
+  {"n":"Ansermanuevo",        "d":"Valle del Cauca","lat":4.7939,"lng":-76.0311,"a":"AGC Clan del Golfo / redes criminales"},
+  {"n":"El Aguila",           "d":"Valle del Cauca","lat":4.9200,"lng":-76.0600,"a":"AGC Clan del Golfo / redes criminales"},
+  {"n":"El Cairo",            "d":"Valle del Cauca","lat":4.9700,"lng":-76.2400,"a":"FARC-EMC / AGC — frontera Choco"},
+  {"n":"Alcala",              "d":"Valle del Cauca","lat":4.6703,"lng":-75.7808,"a":"Redes criminales"},
+  {"n":"Obando",              "d":"Valle del Cauca","lat":4.5767,"lng":-75.9858,"a":"AGC Clan del Golfo"},
+  {"n":"La Victoria",         "d":"Valle del Cauca","lat":4.5225,"lng":-75.8894,"a":"Redes criminales"},
+  {"n":"Ulloa",               "d":"Valle del Cauca","lat":4.7150,"lng":-75.7700,"a":"Redes criminales"},
+  # ── NARINO ────────────────────────────────────────────────────────
+  {"n":"Tumaco",              "d":"Narino","lat":1.8081,"lng":-78.7618,"a":"FARC-EMC Columna Daniel Aldana / Segunda Marquetalia — epicentro Pacifico Sur"},
+  {"n":"Barbacoas",           "d":"Narino","lat":1.6728,"lng":-78.1403,"a":"FARC-EMC Columna Daniel Aldana — corredor fluvial"},
+  {"n":"Roberto Payan",       "d":"Narino","lat":1.8539,"lng":-77.9472,"a":"FARC-EMC Columna Daniel Aldana / Segunda Marquetalia"},
+  {"n":"Magui Payan",         "d":"Narino","lat":1.8397,"lng":-77.5883,"a":"FARC-EMC Columna Daniel Aldana"},
+  {"n":"Olaya Herrera",       "d":"Narino","lat":2.3181,"lng":-78.1567,"a":"FARC-EMC / Segunda Marquetalia — costa Pacifica"},
+  {"n":"El Charco",           "d":"Narino","lat":2.4806,"lng":-77.9889,"a":"FARC-EMC / Segunda Marquetalia"},
+  {"n":"La Tola",             "d":"Narino","lat":2.9822,"lng":-78.2258,"a":"FARC-EMC / Segunda Marquetalia — costa norte Narino"},
+  {"n":"Iscuande",            "d":"Narino","lat":2.4444,"lng":-77.9786,"a":"FARC-EMC / Segunda Marquetalia"},
+  {"n":"Mosquera (Narino)",   "d":"Narino","lat":2.5100,"lng":-78.4300,"a":"FARC-EMC Segunda Marquetalia"},
+  {"n":"Francisco Pizarro",   "d":"Narino","lat":1.1750,"lng":-78.7300,"a":"FARC-EMC Columna Daniel Aldana — costa norte"},
+  {"n":"Ipiales",             "d":"Narino","lat":0.8294,"lng":-77.6441,"a":"FARC-EMC / Los Lobos Ecuador — zona fronteriza Ecuador"},
+  {"n":"Cumbal",              "d":"Narino","lat":0.9139,"lng":-77.7892,"a":"FARC-EMC Frente 29 — resguardos indigenas frontera Ecuador"},
+  {"n":"Cuaspud",             "d":"Narino","lat":0.9300,"lng":-77.6900,"a":"FARC-EMC — frontera Ecuador"},
+  {"n":"Aldana",              "d":"Narino","lat":0.9000,"lng":-77.5900,"a":"FARC-EMC — frontera Ecuador"},
+  {"n":"Puerres",             "d":"Narino","lat":0.9333,"lng":-77.5000,"a":"FARC-EMC — zona fronteriza"},
+  {"n":"Ricaurte",            "d":"Narino","lat":1.2119,"lng":-77.9844,"a":"FARC-EMC Frente 29 — corredor fronterizo Ecuador"},
+  {"n":"Mallama",             "d":"Narino","lat":1.0300,"lng":-77.9700,"a":"FARC-EMC Frente 29"},
+  {"n":"Samaniego",           "d":"Narino","lat":1.3444,"lng":-77.5944,"a":"FARC-EMC Columna Comuneros del Sur — epicentro Corregimiento La Albania"},
+  {"n":"Los Andes (Narino)",  "d":"Narino","lat":1.4900,"lng":-77.5300,"a":"FARC-EMC Columna Comuneros del Sur"},
+  {"n":"Linares",             "d":"Narino","lat":1.3700,"lng":-77.4600,"a":"FARC-EMC Columna Comuneros del Sur"},
+  {"n":"Ancuya",              "d":"Narino","lat":1.4200,"lng":-77.4200,"a":"FARC-EMC Columna Comuneros del Sur"},
+  {"n":"El Rosario",          "d":"Narino","lat":1.5900,"lng":-77.4800,"a":"FARC-EMC Columna Comuneros del Sur"},
+  {"n":"Policarpa",           "d":"Narino","lat":1.7500,"lng":-77.4500,"a":"FARC-EMC Columna Comuneros del Sur"},
+  {"n":"Cumbitara",           "d":"Narino","lat":1.6600,"lng":-77.5700,"a":"FARC-EMC Columna Comuneros del Sur"},
+  {"n":"La Llanada",          "d":"Narino","lat":1.5100,"lng":-77.5700,"a":"FARC-EMC"},
+  {"n":"El Tablon de Gomez",  "d":"Narino","lat":1.4200,"lng":-76.8900,"a":"FARC-EMC"},
+  {"n":"Leiva",               "d":"Narino","lat":1.5781,"lng":-77.3494,"a":"FARC-EMC Columna Comuneros del Sur"},
+  {"n":"Tuquerres",           "d":"Narino","lat":1.0850,"lng":-77.6200,"a":"FARC-EMC Frente 29 — zona andina"},
+  {"n":"Guachucal",           "d":"Narino","lat":0.9800,"lng":-77.6900,"a":"FARC-EMC — resguardos indigenas frontera Ecuador"},
+  {"n":"Guaitarilla",         "d":"Narino","lat":1.1400,"lng":-77.6200,"a":"FARC-EMC"},
+  {"n":"Imues",               "d":"Narino","lat":1.1700,"lng":-77.6500,"a":"FARC-EMC"},
+  {"n":"Ospina",              "d":"Narino","lat":1.1200,"lng":-77.6800,"a":"FARC-EMC"},
+  {"n":"Iles",                "d":"Narino","lat":0.9900,"lng":-77.5200,"a":"FARC-EMC"},
+  {"n":"Sapuyes",             "d":"Narino","lat":1.0000,"lng":-77.6400,"a":"FARC-EMC"},
+  {"n":"Potosi",              "d":"Narino","lat":0.8300,"lng":-77.5400,"a":"FARC-EMC — frontera Ecuador"},
+  {"n":"Pasto",               "d":"Narino","lat":1.2136,"lng":-77.2811,"a":"FARC-EMC zona de influencia — ciudad capital excluida de restriccion extranjeros"},
+  {"n":"La Florida",          "d":"Narino","lat":1.3000,"lng":-77.4200,"a":"FARC-EMC (influencia)"},
+  {"n":"Sandona",             "d":"Narino","lat":1.2900,"lng":-77.4700,"a":"FARC-EMC (influencia)"},
+  {"n":"Consaca",             "d":"Narino","lat":1.2500,"lng":-77.4600,"a":"FARC-EMC (zona de influencia)"},
+  {"n":"Chachagui",           "d":"Narino","lat":1.3600,"lng":-77.2800,"a":"Redes criminales (influencia)"},
+  {"n":"Buesaco",             "d":"Narino","lat":1.3800,"lng":-77.1600,"a":"FARC-EMC / Segunda Marquetalia"},
+  {"n":"San Bernardo (Nar.)", "d":"Narino","lat":1.5100,"lng":-76.9700,"a":"FARC-EMC Segunda Marquetalia"},
+  {"n":"La Cruz",             "d":"Narino","lat":1.5900,"lng":-76.9700,"a":"FARC-EMC Segunda Marquetalia"},
+  {"n":"Alban",               "d":"Narino","lat":1.4500,"lng":-77.4000,"a":"FARC-EMC (influencia)"},
+  {"n":"Taminango",           "d":"Narino","lat":1.5700,"lng":-77.2700,"a":"FARC-EMC"},
+  {"n":"Arboleda",            "d":"Narino","lat":1.6500,"lng":-77.0900,"a":"FARC-EMC / Segunda Marquetalia"},
+  {"n":"San Pablo (Narino)",  "d":"Narino","lat":1.6900,"lng":-76.9600,"a":"FARC-EMC Segunda Marquetalia"},
+  {"n":"Colon (Narino)",      "d":"Narino","lat":1.4800,"lng":-76.9500,"a":"FARC-EMC Segunda Marquetalia"},
+  {"n":"Providencia (Nar.)",  "d":"Narino","lat":1.5400,"lng":-76.9000,"a":"FARC-EMC"},
+  {"n":"Belen (Narino)",      "d":"Narino","lat":1.5900,"lng":-76.8500,"a":"FARC-EMC"},
+]
 
 # Email
 def build_email(fecha, before, after, counts):
@@ -388,10 +552,21 @@ def run():
     by_name = {m['n']: m for m in existing_munis}
     before  = {k: dict(v) for k,v in by_name.items()}
 
-    # Seed GREEN baseline
+    # Seed GREEN baseline (rest of country)
     for g in GREEN_BASELINE:
         if g['n'] not in by_name:
             by_name[g['n']] = make_green(g, today)
+
+    # Seed ALL focus department municipalities (Cauca/Valle/Narino)
+    for f in FOCUS_MUNICIPALITIES:
+        if f['n'] not in by_name:
+            by_name[f['n']] = make_focus_muni(f, today)
+        else:
+            # Mark existing ones as focus dept and update structure info
+            by_name[f['n']]['focus_dept'] = True
+            if not by_name[f['n']].get('a') or by_name[f['n']]['a'] == 'N/A - monitoreo rutinario':
+                by_name[f['n']]['a'] = f.get('a','')
+    print(f"  Focus depts seeded: {len(FOCUS_MUNICIPALITIES)} municipios (Cauca/Valle del Cauca/Narino)")
 
     # Step 0: Migrate old-format municipalities to new dated events format
     migrated = 0
@@ -420,8 +595,10 @@ def run():
         max_tokens=16000,
         system=SYSTEM,
         messages=[{"role":"user","content":
-            f"Hoy es {fecha}. Busca sistematicamente eventos de seguridad y conflicto armado "
-            f"en Colombia del {inicio} al {fecha}. "
+            f"Hoy es {fecha}. Busca SISTEMATICAMENTE eventos de seguridad y conflicto armado "
+            f"en Colombia de los ultimos 60 dias ({str(today - timedelta(days=60))} al {fecha}). "
+            f"Para Cauca, Valle del Cauca y Narino busca hasta 60 dias atras. "
+            f"Para el resto del pais busca los ultimos 30 dias ({inicio} al {fecha}). "
             f"Fuentes: Indepaz, ACLED, OCHA, Crisis Group, Defensoria del Pueblo Colombia, "
             f"El Tiempo, El Colombiano, El Espectador, W Radio, Semana, Caracol, RCN. "
             f"CRITICO: Usa la fecha REAL de cada evento (YYYY-MM-DD), no la fecha de hoy. "
