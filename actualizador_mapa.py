@@ -100,4 +100,5 @@ def enforce_rules(munis):
             pass
 
     if corrections:
-        print(f"  US State Dept rule corrections
+        n = len(corrections)
+    print(f"  US State Dept rule corrections: {n}")
