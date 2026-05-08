@@ -271,47 +271,81 @@ def send_email(fecha,before,after,counts):
 
 SYSTEM = """Eres un analista de seguridad aplicando la Rubrica de Puntuacion de Riesgo Municipal de Convoy of Hope Colombia (Seccion 3, Plan de Contingencia v3.0).
 
-REGLA CRITICA DE FECHAS: Cada evento DEBE incluir su fecha real de ocurrencia en formato YYYY-MM-DD. Esta fecha determina cuando el evento expira del periodo de 30 dias. Si el evento ocurrio hace 2 semanas, usa esa fecha, no la de hoy.
+REGLA CRITICA DE FECHAS: Cada evento DEBE tener la fecha REAL de ocurrencia (YYYY-MM-DD). Esta fecha determina exactamente cuando el evento expira de la ventana de 30 dias. Si el evento ocurrio el 15 de abril, usa 2026-04-15, NO la fecha de hoy.
 
-TODOS los textos en ESPANOL.
+TODOS los textos SIEMPRE en ESPANOL.
 
-Puntos de gravedad:
-  10: Fatalidad civil | Ataque a CoH | Secuestro | Masacre
-   8: Combate dentro de 10km con muertos/heridos | Amenaza directa creible
-   5: Heridos civiles/UXO | Combate dentro de 30km con danos | Explosion/IED | Desplazamiento forzado
-   4: Reten ilegal/extorsion | Amenaza contra lider/socio
-   2: Movimiento armado dentro de 50km | Danos a propiedad | Paro armado
-   1: Tension comunitaria | Zona de coca/via sin despejar
+PUNTOS DE GRAVEDAD POR EVENTO (cada evento por separado con su fecha individual):
+  10 pts: Fatalidad civil por conflicto armado
+  10 pts: Ataque directo a personal, sede o vehiculo de CoH
+  10 pts: Secuestro, rapto o desaparicion forzada
+  10 pts: Masacre (multiples victimas en un solo incidente)
+   8 pts: Combate activo dentro de 10 km con muertos o heridos confirmados
+   8 pts: Amenaza directa creible contra humanitarios o comunidad
+   5 pts: Heridos civiles por conflicto o artefactos explosivos (UXO/minas)
+   5 pts: Combate armado dentro de 30 km con danos a propiedad
+   5 pts: Explosion, IED, AEI o mina antipersona reportada
+   5 pts: Desplazamiento forzado o confinamiento de comunidad
+   4 pts: Reten ilegal, bloqueo armado o extorsion (vacuna)
+   4 pts: Amenaza contra lider social, socio o beneficiario
+   2 pts: Movimiento o presencia armada dentro de 50 km
+   2 pts: Danos a infraestructura o saqueo (no combate)
+   2 pts: Paro armado, toque de queda o restriccion de acceso impuesta por grupos armados
+   1 pt:  Tension comunitaria, protesta o violencia localizada
+   1 pt:  Zona de cultivos ilicitos, via sin despejar, actividad sospechosa
 
-Anulacion automatica a ROJO (auto_red=true + auto_red_date=fecha del evento):
-  - Combate con muertos dentro de 10km | Masacre 3+ muertos | Amenaza directa a CoH
-  - Secuestro de personal/socio/beneficiario | Zona restringida gobierno
-  - Desplazamiento masivo desde programa CoH | Colapso de acceso >50% rutas 7 dias
+MULTIPLICADOR DE FRECUENCIA (aplicado al total de gravedad):
+  1 evento: x1.0 | 2: x1.25 | 3-4: x1.5 | 5-7: x2.0 | 8+: x2.5
 
-Devuelve SOLO JSON valido. Sin preambulo. Sin markdown. Empieza con { termina con }.
-70-80 municipios. Incluye ciudades estables sin eventos. Campo i maximo 90 chars.
+ANULACION AUTOMATICA A ROJO (auto_red=true, auto_red_date=fecha exacta del evento):
+  - Combate activo dentro de 10 km de area habitada con muertes
+  - Masacre de 3 o mas personas en un solo incidente
+  - Amenaza directa creible contra CoH o comunidades que atiende
+  - Secuestro de personal, socio o beneficiario
+  - Zona declarada restringida por el gobierno colombiano
+  - Desplazamiento masivo forzado desde area de programa CoH
+  - Colapso total de acceso: mas del 50% de rutas negadas por 7 dias
+
+MUNICIPIOS PRIORITARIOS A CUBRIR (busca eventos especificamente en estos):
+Cauca: Cajibio, Corinto, Caloto, Buenos Aires, Lopez de Micay, El Tambo, Morales, Suarez, Caldono, Miranda, Toribio, Silvia, Piendamo, Popayan, Santander de Quilichao, Mercaderes, Patia, Balboa
+Valle del Cauca: Cali, Buenaventura, Dagua, Jamundi, Pradera, Florida, Tuluá, Cartago
+Narino: Tumaco, Barbacoas, Olaya Herrera, Roberto Payan, El Charco, Pasto, Ipiales, Samaniego, Ricaurte, La Tola, Iscuande
+Antioquia: Turbo, Apartado, Ituango, Caucasia, Tarazá, Valdivia, Urrao
+Choco: Quibdo, Riosucio, Bojaya, Carmen del Darien
+Norte de Santander: Tibu, San Calixto, El Tarra, El Carmen, Cucuta
+Arauca: Arauca, Saravena, Tame, Fortul, Puerto Rondon
+Putumayo: Puerto Asis, Orito, Valle del Guamuez, Puerto Caicedo, Mocoa
+Caqueta: Florencia, San Vicente del Caguan, La Montanita, El Doncello
+Huila: Neiva y municipios del sur
+Meta, Guaviare, Vichada: conflictos fronterizos y FARC
+Ciudades estables (sin eventos): Bogota, Barranquilla, Cartagena, Santa Marta, Bucaramanga, Armenia, Pereira, Manizales, Tunja
+
+Devuelve SOLO JSON valido. Sin preambulo. Sin markdown. Comienza con { termina con }.
+Entre 70 y 85 municipios. Campo i maximo 90 caracteres.
 
 {
   "fecha": "DD Mmm YYYY",
   "municipios": [
     {
-      "n": "Nombre",
+      "n": "Nombre del municipio",
       "d": "Departamento",
       "lat": 0.0,
       "lng": 0.0,
       "events": [
-        {"date": "YYYY-MM-DD", "pts": 10, "desc": "descripcion en espanol max 80 chars"}
+        {"date": "YYYY-MM-DD", "pts": 10, "desc": "descripcion del evento en espanol max 80 chars"}
       ],
       "auto_red": false,
       "auto_red_why": "",
       "auto_red_date": "",
-      "i": "resumen general maximo 90 chars",
-      "a": "grupos armados activos"
+      "i": "resumen de la situacion del municipio, maximo 90 caracteres",
+      "a": "grupos armados activos en el municipio"
     }
   ]
 }
 
-COORDENADAS: Colombia POSITIVAS. Solo Leticia (-4.2) y Puerto Leguizamo (-0.19) son negativos."""
+COORDENADAS CRITICAS: Colombia esta principalmente al NORTE del ecuador — latitudes POSITIVAS.
+Cauca entre 1.5N y 4N. Valle del Cauca entre 3N y 5N. Narino entre 0.5N y 2.5N. Antioquia entre 5N y 8N.
+UNICAMENTE Leticia (-4.2) y Puerto Leguizamo (-0.19) tienen latitudes negativas."""
 
 def write_html(html, by_name, fecha_str=''):
     merged = list(by_name.values())
@@ -386,14 +420,19 @@ def run():
         max_tokens=16000,
         system=SYSTEM,
         messages=[{"role":"user","content":
-            f"Hoy es {fecha}. Busca eventos de seguridad en Colombia del {inicio} al {fecha} "
-            f"usando: Indepaz, ACLED, OCHA, Crisis Group, Defensoria del Pueblo, El Tiempo, "
-            f"El Colombiano, W Radio, Semana. "
-            f"IMPORTANTE: Para cada evento usa la fecha REAL de ocurrencia (YYYY-MM-DD), "
-            f"no la fecha de hoy. Cubre todas las regiones de Colombia. "
-            f"Incluye ciudades estables sin eventos (events=[]). "
-            f"70-80 municipios. Campo i maximo 90 chars. TODO en ESPANOL. "
-            f"SOLO JSON comenzando con {{ terminando con }}."}],
+            f"Hoy es {fecha}. Busca sistematicamente eventos de seguridad y conflicto armado "
+            f"en Colombia del {inicio} al {fecha}. "
+            f"Fuentes: Indepaz, ACLED, OCHA, Crisis Group, Defensoria del Pueblo Colombia, "
+            f"El Tiempo, El Colombiano, El Espectador, W Radio, Semana, Caracol, RCN. "
+            f"CRITICO: Usa la fecha REAL de cada evento (YYYY-MM-DD), no la fecha de hoy. "
+            f"Busca evento por evento, municipio por municipio, en los departamentos "
+            f"mas afectados: Cauca, Narino, Valle del Cauca, Antioquia, Choco, "
+            f"Norte de Santander, Arauca, Putumayo, Caqueta, Huila, Tolima. "
+            f"Para cada municipio en la lista prioritaria, verifica si hubo eventos "
+            f"en los ultimos 30 dias y registra cada uno por separado con su fecha exacta. "
+            f"Incluye municipios estables sin eventos (events=[]). "
+            f"Entre 70 y 85 municipios total. Campo i maximo 90 chars. TODO en ESPANOL. "
+            f"Devuelve SOLO JSON valido comenzando con {{ terminando con }}."}],
         tools=[{"type":"web_search_20250305","name":"web_search"}]
     )
 
