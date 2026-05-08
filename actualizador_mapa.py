@@ -41,7 +41,7 @@ def run():
     client = anthropic.Anthropic(api_key=API_KEY)
 
     resp = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=8000,
         system=SYSTEM,
         messages=[{"role":"user","content":
