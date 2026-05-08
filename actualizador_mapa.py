@@ -1,6 +1,6 @@
 import os, json, re, sys
 import urllib.request, urllib.error
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from pathlib import Path
 
 try:
@@ -18,6 +18,7 @@ EMAIL_TO    = os.environ.get("EMAIL_TO", "")
 MAP_URL     = os.environ.get("MAP_URL", "https://bcorreia-coh.github.io/colombia-risk-map/")
 MESES       = {1:'ene',2:'feb',3:'mar',4:'abr',5:'may',6:'jun',
                7:'jul',8:'ago',9:'sep',10:'oct',11:'nov',12:'dic'}
+EVENT_WINDOW_DAYS = 30
 
 # Rubrica CoH Seccion 3
 def get_multiplier(n):
@@ -51,9 +52,87 @@ EXCLUDED_CITIES = {
     'medellin','medellín','bello','envigado','itagui','itagüí'
 }
 ZONE_ES    = {'red':'ROJO','orange':'NARANJA','yellow':'AMARILLO','green':'VERDE'}
-ZONE_COLOR = {'red':'#dc2626','orange':'#ea580c','yellow':'#b45309','green':'#15803d'}
+ZONE_COLOR = {'red':'#dc2626','orange':'#ea580c','yellow':'#ca8a04','green':'#15803d'}
 ZONE_BG    = {'red':'#fef2f2','orange':'#fff7ed','yellow':'#fefce8','green':'#f0fdf4'}
 
+# Date utilities
+def parse_event_date(date_str):
+    try:
+        return datetime.strptime(str(date_str).strip(), '%Y-%m-%d').date()
+    except Exception:
+        return date.today()
+
+def event_is_active(event, today):
+    d = parse_event_date(event.get('date',''))
+    return (today - d).days <= EVENT_WINDOW_DAYS
+
+def merge_events(existing, new_events, today):
+    existing_keys = set()
+    for e in existing:
+        k = (e.get('date',''), e.get('pts',0), e.get('desc','')[:40])
+        existing_keys.add(k)
+    merged = [e for e in existing if event_is_active(e, today)]
+    for e in new_events:
+        k = (e.get('date',''), e.get('pts',0), e.get('desc','')[:40])
+        if k not in existing_keys and event_is_active(e, today):
+            merged.append(e)
+            existing_keys.add(k)
+    return merged
+
+def recalculate(m, today):
+    dept = m.get('d','').lower()
+    name = m.get('n','').lower()
+    amazon = ['leticia','leguizamo']
+    if m.get('lat', 0) < -0.5:
+        if not any(a in name for a in amazon):
+            m['lat'] = abs(m['lat'])
+
+    all_events    = m.get('events', [])
+    active_events = [e for e in all_events if event_is_active(e, today)]
+    m['events']   = active_events
+
+    auto_red      = m.get('auto_red', False)
+    auto_red_date = m.get('auto_red_date', '')
+    if auto_red and auto_red_date:
+        if not event_is_active({'date': auto_red_date}, today):
+            auto_red = False
+            m['auto_red'] = False
+            m['auto_red_why'] = ''
+            m['auto_red_date'] = ''
+
+    if auto_red:
+        m['r'] = 'red'; m['sz'] = 22
+        m['sc'] = f"ROJO AUTOMATICO: {m.get('auto_red_why','')}"
+        m['adjusted_score'] = 99
+        m['ev_count'] = len(active_events)
+        return m
+
+    sev   = sum(e.get('pts',0) for e in active_events)
+    count = len(active_events)
+    mult  = get_multiplier(count)
+    adj   = round(sev * mult, 1)
+    m['adjusted_score'] = adj
+    m['ev_count']       = count
+
+    if active_events:
+        oldest = min(parse_event_date(e.get('date','')) for e in active_events)
+        m['next_expiry'] = str(oldest + timedelta(days=EVENT_WINDOW_DAYS))
+    else:
+        m['next_expiry'] = ''
+
+    zona = score_to_zone(adj)
+    m['sz'] = score_to_size(adj)
+    m['sc'] = f"Gravedad:{sev}pts x{mult} = {adj} | {ZONE_ES.get(zona,'')}"
+
+    if zona == 'orange':
+        if not any(rd in dept for rd in RESTRICTED_DEPTS) or any(ec in name for ec in EXCLUDED_CITIES):
+            zona = 'yellow'
+            m['sc'] = f"Gravedad:{sev}pts x{mult} = {adj} | AMARILLO (depto. no restringido)"
+
+    m['r'] = zona
+    return m
+
+# GREEN baseline
 GREEN_BASELINE = [
     {"n":"Bogota",               "d":"Cundinamarca (D.C.)", "lat":4.7110, "lng":-74.0721},
     {"n":"Barranquilla",         "d":"Atlantico",           "lat":10.9685,"lng":-74.7813},
@@ -67,7 +146,7 @@ GREEN_BASELINE = [
     {"n":"Sincelejo",            "d":"Sucre",               "lat":9.3047, "lng":-75.3978},
     {"n":"Leticia",              "d":"Amazonas",            "lat":-4.2133,"lng":-69.9400},
     {"n":"Mitu",                 "d":"Vaupes",              "lat":1.1985, "lng":-70.1734},
-    {"n":"Iniride",              "d":"Guainia",             "lat":3.8653, "lng":-67.9239},
+    {"n":"Inirida",              "d":"Guainia",             "lat":3.8653, "lng":-67.9239},
     {"n":"Puerto Carreno",       "d":"Vichada",             "lat":6.1891, "lng":-67.4839},
     {"n":"Yopal",                "d":"Casanare",            "lat":5.3378, "lng":-72.3959},
     {"n":"Villavicencio",        "d":"Meta",                "lat":4.1420, "lng":-73.6267},
@@ -87,400 +166,261 @@ GREEN_BASELINE = [
     {"n":"Palmira",              "d":"Valle del Cauca",     "lat":3.5394, "lng":-76.2983},
 ]
 
-def make_green(m):
+def make_green(m, today):
     return {
-        "n": m["n"], "d": m["d"], "lat": m["lat"], "lng": m["lng"],
-        "r": "green", "sz": 10, "adjusted_score": 0,
-        "ev_count": 0, "ev_pts": [],
-        "sc": "Puntaje ajustado: 0 | VERDE",
-        "i":  "Sin incidentes de conflicto armado verificados en los ultimos 30 dias.",
-        "a":  "N/A - monitoreo rutinario",
-        "auto_red": False, "auto_red_why": ""
+        "n":m["n"],"d":m["d"],"lat":m["lat"],"lng":m["lng"],
+        "r":"green","sz":10,"adjusted_score":0,"ev_count":0,
+        "events":[],"sc":"Puntaje ajustado: 0 | VERDE",
+        "i":"Sin incidentes de conflicto armado verificados en los ultimos 30 dias.",
+        "a":"N/A - monitoreo rutinario",
+        "auto_red":False,"auto_red_why":"","auto_red_date":"","next_expiry":""
     }
 
-def enforce_coh_rubric(munis):
-    amazon = ['leticia','leguizamo']
-    corrections = []
-    for m in munis:
-        dept  = m.get('d','').lower()
-        name  = m.get('n','').lower()
-        if m.get('lat', 0) < -0.5:
-            if not any(a in name for a in amazon):
-                m['lat'] = abs(m['lat'])
-        ev_pts   = m.get('ev_pts', [])
-        ev_count = m.get('ev_count', len(ev_pts))
-        auto_red = m.get('auto_red', False)
-        sev      = sum(ev_pts)
-        mult     = get_multiplier(ev_count)
-        adj      = round(sev * mult, 1)
-        m['adjusted_score'] = adj
-        m['ev_count']       = ev_count
-        if auto_red:
-            m['r']  = 'red'
-            m['sz'] = 22
-            why = m.get('auto_red_why', 'Condicion de anulacion automatica activada')
-            m['sc'] = f"ROJO AUTOMATICO: {why}"
-            continue
-        zona = score_to_zone(adj)
-        m['sz'] = score_to_size(adj)
-        m['sc'] = f"Gravedad:{sev}pts x{mult} = {adj} | {ZONE_ES.get(zona, zona.upper())}"
-        if zona == 'orange':
-            en_restringido = any(rd in dept for rd in RESTRICTED_DEPTS)
-            es_excluida    = any(ec in name for ec in EXCLUDED_CITIES)
-            if not en_restringido or es_excluida:
-                zona = 'yellow'
-                m['sc'] = f"Gravedad:{sev}pts x{mult} = {adj} | AMARILLO (depto. no restringido)"
-                corrections.append(m['n'])
-        m['r'] = zona
-    if corrections:
-        print(f"  NARANJA->AMARILLO: {', '.join(corrections)}")
-    return munis
-
-# Email con SendGrid
+# Email
 def build_email(fecha, before, after, counts):
-    escalated   = []
-    deescalated = []
-    nuevos      = []
-    auto_rojos  = []
-    order = {'green':0,'yellow':1,'orange':2,'red':3}
-
-    for name, m in after.items():
-        nz = m.get('r','green')
+    escalated=[]; deescalated=[]; nuevos=[]; auto_rojos=[]
+    order={'green':0,'yellow':1,'orange':2,'red':3}
+    for name,m in after.items():
+        nz=m.get('r','green')
         if m.get('auto_red'):
-            auto_rojos.append((name, m.get('d',''), m.get('auto_red_why','')))
+            auto_rojos.append((name,m.get('d',''),m.get('auto_red_why',''),m.get('auto_red_date','')))
         if name not in before:
-            nuevos.append((name, m.get('d',''), nz, m.get('i','')))
+            nuevos.append((name,m.get('d',''),nz,m.get('i','')))
         else:
-            oz = before[name].get('r','green')
-            if order.get(nz,0) > order.get(oz,0):
-                escalated.append((name, m.get('d',''), oz, nz, m.get('i','')))
-            elif order.get(nz,0) < order.get(oz,0):
-                deescalated.append((name, m.get('d',''), oz, nz))
-
-    escalated.sort(key=lambda x: -order.get(x[3],0))
+            oz=before[name].get('r','green')
+            if order.get(nz,0)>order.get(oz,0):
+                escalated.append((name,m.get('d',''),oz,nz,m.get('i','')))
+            elif order.get(nz,0)<order.get(oz,0):
+                deescalated.append((name,m.get('d',''),oz,nz,m.get('next_expiry','')))
+    escalated.sort(key=lambda x:-order.get(x[3],0))
 
     def badge(z):
-        c = ZONE_COLOR.get(z,'#666')
-        b = ZONE_BG.get(z,'#f9f9f9')
+        c=ZONE_COLOR.get(z,'#666'); b=ZONE_BG.get(z,'#f9f9f9')
         return (f'<span style="background:{b};color:{c};border:1px solid {c};'
                 f'padding:2px 8px;border-radius:3px;font-size:11px;font-weight:700;'
                 f'font-family:monospace">{ZONE_ES.get(z,z.upper())}</span>')
 
-    def arrow(o, n):
-        return f'{badge(o)} &nbsp;&#8594;&nbsp; {badge(n)}'
+    def arrow(o,n): return f'{badge(o)} &nbsp;&#8594;&nbsp; {badge(n)}'
 
-    re_rows = "".join(
-        f'<tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">'
-        f'<strong>{n}</strong><br><small style="color:#6b7280">{d}</small></td>'
-        f'<td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">{arrow(o,nw)}</td>'
-        f'<td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;font-size:12px">{i}</td></tr>'
-        for n, d, o, nw, i in escalated
-    )
-    de_rows = "".join(
-        f'<tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">'
-        f'<strong>{n}</strong><br><small style="color:#6b7280">{d}</small></td>'
-        f'<td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">{arrow(o,nw)}</td></tr>'
-        for n, d, o, nw in deescalated
-    )
-    nw_rows = "".join(
-        f'<tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">'
-        f'<strong>{n}</strong><br><small style="color:#6b7280">{d}</small></td>'
-        f'<td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">{badge(z)}</td>'
-        f'<td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;font-size:12px">{i}</td></tr>'
-        for n, d, z, i in nuevos
-    )
+    re_rows="".join(f'<tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb"><strong>{n}</strong><br><small style="color:#6b7280">{d}</small></td><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">{arrow(o,nw)}</td><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;font-size:12px">{i}</td></tr>' for n,d,o,nw,i in escalated)
+    de_rows="".join(f'<tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb"><strong>{n}</strong><br><small style="color:#6b7280">{d}</small></td><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">{arrow(o,nw)}</td><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;font-size:11px;color:#6b7280">{"Eventos expiran: "+exp if exp else ""}</td></tr>' for n,d,o,nw,exp in deescalated)
+    nw_rows="".join(f'<tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb"><strong>{n}</strong><br><small style="color:#6b7280">{d}</small></td><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">{badge(z)}</td><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;font-size:12px">{i}</td></tr>' for n,d,z,i in nuevos)
 
-    def tbl(title, color, header_cols, rows):
-        ths = "".join(
-            f'<th style="padding:8px 10px;text-align:left;font-size:11px;color:#6b7280;'
-            f'border-bottom:2px solid #e5e7eb">{h}</th>' for h in header_cols
-        )
-        return (
-            f'<h3 style="color:{color};font-size:14px;margin-top:24px">{title}</h3>'
-            f'<table width="100%" cellpadding="0" cellspacing="0" '
-            f'style="border-collapse:collapse;font-size:13px;margin-bottom:20px">'
-            f'<thead><tr style="background:#f9fafb">{ths}</tr></thead>'
-            f'<tbody>{rows}</tbody></table>'
-        )
-
-    body = ""
+    body=""
     if auto_rojos:
-        items = "".join(f'<li style="margin-bottom:4px"><strong>{n}</strong> ({d}): {w}</li>'
-                        for n, d, w in auto_rojos)
-        body += (f'<div style="background:#fef2f2;border:1px solid #dc2626;border-radius:6px;'
-                 f'padding:14px 16px;margin-bottom:20px">'
-                 f'<h3 style="margin:0 0 8px;color:#dc2626;font-size:14px">'
-                 f'Anulaciones Automaticas a ROJO ({len(auto_rojos)})</h3>'
-                 f'<ul style="margin:0;padding-left:18px;font-size:13px">{items}</ul></div>')
-    if escalated:
-        body += tbl(f'Escalaciones - Zonas que Empeoraron ({len(escalated)})',
-                    '#dc2626', ['MUNICIPIO','CAMBIO','INCIDENTE'], re_rows)
-    if deescalated:
-        body += tbl(f'Mejoras - Zonas que Mejoraron ({len(deescalated)})',
-                    '#15803d', ['MUNICIPIO','CAMBIO'], de_rows)
-    if nuevos:
-        body += tbl(f'Municipios Nuevos Agregados ({len(nuevos)})',
-                    '#374151', ['MUNICIPIO','ZONA','INCIDENTE'], nw_rows)
-    if not body:
-        body = '<p style="color:#6b7280;font-style:italic">No se detectaron cambios de zona esta semana.</p>'
+        items="".join(f'<li style="margin-bottom:4px"><strong>{n}</strong> ({d}): {w}<br><small style="color:#9ca3af">Fecha del evento: {dt}</small></li>' for n,d,w,dt in auto_rojos)
+        body+=(f'<div style="background:#fef2f2;border:1px solid #dc2626;border-radius:6px;padding:14px 16px;margin-bottom:20px"><h3 style="margin:0 0 8px;color:#dc2626;font-size:14px">Anulaciones Automaticas a ROJO ({len(auto_rojos)})</h3><ul style="margin:0;padding-left:18px;font-size:13px">{items}</ul></div>')
 
-    r = counts.get('red',0); o = counts.get('orange',0)
-    y = counts.get('yellow',0); g = counts.get('green',0)
+    def tbl(title,color,hdrs,rows):
+        ths="".join(f'<th style="padding:8px 10px;text-align:left;font-size:11px;color:#6b7280;border-bottom:2px solid #e5e7eb">{h}</th>' for h in hdrs)
+        return (f'<h3 style="color:{color};font-size:14px;margin-top:24px">{title}</h3>'
+                f'<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin-bottom:20px"><thead><tr style="background:#f9fafb">{ths}</tr></thead><tbody>{rows}</tbody></table>')
 
-    html = (
-        '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"></head>'
-        '<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,sans-serif">'
-        '<table width="100%" cellpadding="0" cellspacing="0" '
-        'style="background:#f3f4f6;padding:24px 0"><tr><td align="center">'
-        '<table width="620" cellpadding="0" cellspacing="0" '
-        'style="background:#fff;border-radius:8px;overflow:hidden;'
-        'box-shadow:0 1px 3px rgba(0,0,0,.1)">'
-        '<tr><td style="background:#0a1223;padding:24px 28px">'
-        '<p style="margin:0;font-size:11px;color:#38bdf8;font-family:monospace;'
-        'letter-spacing:.1em;text-transform:uppercase">CONVOY OF HOPE - COLOMBIA</p>'
-        f'<h1 style="margin:6px 0 0;color:#f0f6ff;font-size:20px;font-weight:700">'
-        f'Actualizacion Semanal del Mapa de Riesgo</h1>'
-        f'<p style="margin:4px 0 0;color:#8faabb;font-size:13px">{fecha} &nbsp;·&nbsp; CONFIDENCIAL</p>'
-        '</td></tr>'
-        '<tr><td style="background:#080f1e;padding:14px 28px">'
-        '<table width="100%" cellpadding="0" cellspacing="0"><tr>'
-        f'<td align="center" style="color:#f87171;font-family:monospace">'
-        f'<span style="font-size:26px;font-weight:700">{r}</span><br>'
-        f'<span style="font-size:10px;letter-spacing:.1em">ROJO</span></td>'
-        f'<td align="center" style="color:#fb923c;font-family:monospace">'
-        f'<span style="font-size:26px;font-weight:700">{o}</span><br>'
-        f'<span style="font-size:10px;letter-spacing:.1em">NARANJA</span></td>'
-        f'<td align="center" style="color:#fbbf24;font-family:monospace">'
-        f'<span style="font-size:26px;font-weight:700">{y}</span><br>'
-        f'<span style="font-size:10px;letter-spacing:.1em">AMARILLO</span></td>'
-        f'<td align="center" style="color:#4ade80;font-family:monospace">'
-        f'<span style="font-size:26px;font-weight:700">{g}</span><br>'
-        f'<span style="font-size:10px;letter-spacing:.1em">VERDE</span></td>'
-        '</tr></table></td></tr>'
-        f'<tr><td style="padding:24px 28px">{body}'
-        f'<div style="text-align:center;margin-top:28px">'
-        f'<a href="{MAP_URL}" style="background:#0a1223;color:#38bdf8;text-decoration:none;'
-        f'padding:12px 28px;border-radius:4px;font-family:monospace;font-size:12px;'
-        f'letter-spacing:.08em;border:1px solid #38bdf8">VER MAPA COMPLETO</a></div>'
-        '<p style="margin-top:28px;font-size:11px;color:#9ca3af;border-top:1px solid #e5e7eb;'
-        'padding-top:16px">Actualizacion automatica generada cada domingo 23:00 COT usando '
-        'Indepaz, ACLED, OCHA, Crisis Group, Defensoria del Pueblo y medios colombianos.<br><br>'
-        'CONFIDENCIAL - Solo Personal Autorizado CoH Colombia</p>'
-        '</td></tr></table></td></tr></table></body></html>'
-    )
+    if escalated:  body+=tbl(f'Escalaciones ({len(escalated)})','#dc2626',['MUNICIPIO','CAMBIO','INCIDENTE'],re_rows)
+    if deescalated:body+=tbl(f'Mejoras ({len(deescalated)})','#15803d',['MUNICIPIO','CAMBIO','EVENTOS EXPIRAN'],de_rows)
+    if nuevos:     body+=tbl(f'Municipios Nuevos ({len(nuevos)})','#374151',['MUNICIPIO','ZONA','INCIDENTE'],nw_rows)
+    if not body:   body='<p style="color:#6b7280;font-style:italic">No se detectaron cambios de zona esta semana.</p>'
 
-    lines = [
-        "CONVOY OF HOPE - COLOMBIA",
-        f"Actualizacion Semanal del Mapa de Riesgo - {fecha}",
-        "CONFIDENCIAL", "",
-        f"ROJO={r} | NARANJA={o} | AMARILLO={y} | VERDE={g}", ""
-    ]
-    if auto_rojos:
-        lines += [f"ANULACIONES AUTOMATICAS A ROJO ({len(auto_rojos)}):"] + \
-                 [f"  - {n} ({d}): {w}" for n,d,w in auto_rojos] + [""]
-    if escalated:
-        lines += [f"ESCALACIONES ({len(escalated)}):"] + \
-                 [f"  - {n} ({d}): {ZONE_ES[o]} -> {ZONE_ES[nw]} - {i}" for n,d,o,nw,i in escalated] + [""]
-    if deescalated:
-        lines += [f"MEJORAS ({len(deescalated)}):"] + \
-                 [f"  - {n} ({d}): {ZONE_ES[o]} -> {ZONE_ES[nw]}" for n,d,o,nw in deescalated] + [""]
+    r=counts.get('red',0);o=counts.get('orange',0);y=counts.get('yellow',0);g=counts.get('green',0)
+    html=(f'<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"></head><body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,sans-serif"><table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:24px 0"><tr><td align="center"><table width="620" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.1)"><tr><td style="background:#0a1223;padding:24px 28px"><p style="margin:0;font-size:11px;color:#38bdf8;font-family:monospace;letter-spacing:.1em;text-transform:uppercase">CONVOY OF HOPE - COLOMBIA</p><h1 style="margin:6px 0 0;color:#f0f6ff;font-size:20px;font-weight:700">Actualizacion Semanal del Mapa de Riesgo</h1><p style="margin:4px 0 0;color:#8faabb;font-size:13px">{fecha} &nbsp;·&nbsp; CONFIDENCIAL</p></td></tr><tr><td style="background:#080f1e;padding:14px 28px"><table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="color:#f87171;font-family:monospace"><span style="font-size:26px;font-weight:700">{r}</span><br><span style="font-size:10px;letter-spacing:.1em">ROJO</span></td><td align="center" style="color:#fb923c;font-family:monospace"><span style="font-size:26px;font-weight:700">{o}</span><br><span style="font-size:10px;letter-spacing:.1em">NARANJA</span></td><td align="center" style="color:#fde047;font-family:monospace"><span style="font-size:26px;font-weight:700">{y}</span><br><span style="font-size:10px;letter-spacing:.1em">AMARILLO</span></td><td align="center" style="color:#4ade80;font-family:monospace"><span style="font-size:26px;font-weight:700">{g}</span><br><span style="font-size:10px;letter-spacing:.1em">VERDE</span></td></tr></table></td></tr><tr><td style="padding:24px 28px">{body}<div style="text-align:center;margin-top:28px"><a href="{MAP_URL}" style="background:#0a1223;color:#38bdf8;text-decoration:none;padding:12px 28px;border-radius:4px;font-family:monospace;font-size:12px;letter-spacing:.08em;border:1px solid #38bdf8">VER MAPA COMPLETO</a></div><p style="margin-top:28px;font-size:11px;color:#9ca3af;border-top:1px solid #e5e7eb;padding-top:16px">Las zonas se mantienen mientras los eventos permanezcan dentro de la ventana de 30 dias desde su fecha de ocurrencia. Solo cambian cuando los eventos expiran o nuevos eventos modifican la puntuacion.<br><br>CONFIDENCIAL - Solo Personal Autorizado CoH Colombia</p></td></tr></table></td></tr></table></body></html>')
+
+    lines=[f"CoH Colombia - Actualizacion {fecha}","CONFIDENCIAL","",f"ROJO={r} | NARANJA={o} | AMARILLO={y} | VERDE={g}",""]
+    if auto_rojos: lines+=[f"ROJOS AUTOMATICOS ({len(auto_rojos)}):"] +[f"  {n} ({d}): {w} | {dt}" for n,d,w,dt in auto_rojos]+[""]
+    if escalated:  lines+=[f"ESCALACIONES ({len(escalated)}):"] +[f"  {n} ({d}): {ZONE_ES[o]}->{ZONE_ES[nw]}" for n,d,o,nw,i in escalated]+[""]
+    if deescalated:lines+=[f"MEJORAS ({len(deescalated)}):"] +[f"  {n} ({d}): {ZONE_ES[o]}->{ZONE_ES[nw]} | expiran {exp}" for n,d,o,nw,exp in deescalated]+[""]
     if not escalated and not deescalated and not nuevos and not auto_rojos:
-        lines += ["No se detectaron cambios de zona esta semana.", ""]
+        lines+=["No se detectaron cambios de zona esta semana.",""]
     lines.append(f"Ver mapa: {MAP_URL}")
+    return html,"\n".join(lines)
 
-    return html, "\n".join(lines)
-
-def send_email(fecha, before, after, counts):
-    if not all([SG_KEY, EMAIL_FROM, EMAIL_TO]):
-        print("Credenciales SendGrid no configuradas - omitiendo envio de email")
-        return
-    html_body, text_body = build_email(fecha, before, after, counts)
-    recipients = [{"email": r.strip()} for r in EMAIL_TO.split(',')]
-    payload = json.dumps({
-        "personalizations": [{"to": recipients}],
-        "from": {"email": EMAIL_FROM, "name": "CoH Colombia Risk Map"},
-        "subject": f"CoH Colombia - Mapa de Riesgo Actualizado: {fecha}",
-        "content": [
-            {"type": "text/plain", "value": text_body},
-            {"type": "text/html",  "value": html_body}
-        ]
-    }).encode('utf-8')
-    req = urllib.request.Request(
-        "https://api.sendgrid.com/v3/mail/send",
-        data=payload,
-        headers={"Authorization": f"Bearer {SG_KEY}", "Content-Type": "application/json"},
-        method="POST"
-    )
+def send_email(fecha,before,after,counts):
+    if not all([SG_KEY,EMAIL_FROM,EMAIL_TO]):
+        print("Credenciales SendGrid no configuradas - omitiendo email"); return
+    html_body,text_body=build_email(fecha,before,after,counts)
+    recipients=[{"email":r.strip()} for r in EMAIL_TO.split(',')]
+    payload=json.dumps({"personalizations":[{"to":recipients}],"from":{"email":EMAIL_FROM,"name":"CoH Colombia Risk Map"},"subject":f"CoH Colombia - Mapa de Riesgo Actualizado: {fecha}","content":[{"type":"text/plain","value":text_body},{"type":"text/html","value":html_body}]}).encode('utf-8')
+    req=urllib.request.Request("https://api.sendgrid.com/v3/mail/send",data=payload,headers={"Authorization":f"Bearer {SG_KEY}","Content-Type":"application/json"},method="POST")
     try:
-        with urllib.request.urlopen(req) as resp:
-            print(f"Email enviado correctamente (status {resp.status})")
-    except urllib.error.HTTPError as e:
-        print(f"Error SendGrid {e.code}: {e.read().decode()}")
+        with urllib.request.urlopen(req) as resp: print(f"Email enviado (status {resp.status})")
+    except urllib.error.HTTPError as e: print(f"Error SendGrid {e.code}: {e.read().decode()}")
 
-# Prompt del sistema
 SYSTEM = """Eres un analista de seguridad aplicando la Rubrica de Puntuacion de Riesgo Municipal de Convoy of Hope Colombia (Seccion 3, Plan de Contingencia v3.0).
 
-IMPORTANTE: TODOS los campos de texto deben estar en ESPANOL. Esto incluye los campos "i", "a" y "auto_red_why".
+REGLA CRITICA DE FECHAS: Cada evento DEBE incluir su fecha real de ocurrencia en formato YYYY-MM-DD. Esta fecha determina cuando el evento expira del periodo de 30 dias. Si el evento ocurrio hace 2 semanas, usa esa fecha, no la de hoy.
 
-PASO 1 - Puntos de gravedad por tipo de evento:
-  10 pts: Fatalidad civil | Ataque a CoH | Secuestro/desaparicion | Masacre
-   8 pts: Combate dentro de 10km con muertos/heridos | Amenaza directa contra humanitarios
-   5 pts: Heridos civiles por conflicto/UXO | Combate dentro de 30km con danos | Explosion/IED/UXO | Desplazamiento forzado
-   4 pts: Reten ilegal/bloqueo/extorsion | Amenaza contra lider/socio/beneficiario
-   2 pts: Movimiento armado dentro de 50km | Danos a propiedad | Paro armado/restriccion de acceso
-   1 pt:  Tension comunitaria/protesta | Zona de coca/via sin despejar
+TODOS los textos en ESPANOL.
 
-PASO 2 - Multiplicador de frecuencia:
-  1 evento: x1.0 | 2: x1.25 | 3-4: x1.5 | 5-7: x2.0 | 8+: x2.5
+Puntos de gravedad:
+  10: Fatalidad civil | Ataque a CoH | Secuestro | Masacre
+   8: Combate dentro de 10km con muertos/heridos | Amenaza directa creible
+   5: Heridos civiles/UXO | Combate dentro de 30km con danos | Explosion/IED | Desplazamiento forzado
+   4: Reten ilegal/extorsion | Amenaza contra lider/socio
+   2: Movimiento armado dentro de 50km | Danos a propiedad | Paro armado
+   1: Tension comunitaria | Zona de coca/via sin despejar
 
-PASO 3 - El script calcula la zona automaticamente (puntaje ajustado = gravedad x multiplicador):
-  0-4: VERDE | 5-14: AMARILLO | 15-29: NARANJA | 30+: ROJO
+Anulacion automatica a ROJO (auto_red=true + auto_red_date=fecha del evento):
+  - Combate con muertos dentro de 10km | Masacre 3+ muertos | Amenaza directa a CoH
+  - Secuestro de personal/socio/beneficiario | Zona restringida gobierno
+  - Desplazamiento masivo desde programa CoH | Colapso de acceso >50% rutas 7 dias
 
-ANULACION AUTOMATICA A ROJO (set auto_red=true):
-  - Combate activo dentro de 10km con muertos confirmados
-  - Masacre o evento de bajas masivas (3 o mas muertos en un solo incidente)
-  - Amenaza directa creible contra CoH o comunidades atendidas
-  - Secuestro de personal, socio o beneficiario
-  - Zona declarada restringida por el gobierno
-  - Desplazamiento masivo forzado desde area de programa CoH
-  - Colapso total de acceso (mas del 50% de rutas denegadas por 7 dias)
-
-Devuelve SOLO un JSON valido. Sin preambulo. Sin markdown. Comienza con { termina con }.
-70-80 municipios. Incluye ciudades estables sin eventos (ev_pts=[], ev_count=0).
-Campo "i" maximo 90 caracteres. TODOS los textos en ESPANOL.
+Devuelve SOLO JSON valido. Sin preambulo. Sin markdown. Empieza con { termina con }.
+70-80 municipios. Incluye ciudades estables sin eventos. Campo i maximo 90 chars.
 
 {
   "fecha": "DD Mmm YYYY",
   "municipios": [
     {
-      "n": "Nombre municipio",
+      "n": "Nombre",
       "d": "Departamento",
       "lat": 0.0,
       "lng": 0.0,
-      "ev_pts": [10, 5, 4],
-      "ev_count": 3,
+      "events": [
+        {"date": "YYYY-MM-DD", "pts": 10, "desc": "descripcion en espanol max 80 chars"}
+      ],
       "auto_red": false,
       "auto_red_why": "",
-      "i": "resumen en espanol maximo 90 caracteres",
-      "a": "grupos armados activos en espanol"
+      "auto_red_date": "",
+      "i": "resumen general maximo 90 chars",
+      "a": "grupos armados activos"
     }
   ]
 }
 
-COORDENADAS CRITICAS: Colombia es principalmente al NORTE del ecuador - latitudes POSITIVAS.
-Solo Leticia (-4.2) y Puerto Leguizamo (-0.19) son negativos."""
+COORDENADAS: Colombia POSITIVAS. Solo Leticia (-4.2) y Puerto Leguizamo (-0.19) son negativos."""
+
+def write_html(html, by_name, fecha_str=''):
+    merged = list(by_name.values())
+    inner  = json.dumps(merged, ensure_ascii=False)[1:-1]
+    html   = re.sub(r'(const MUNIS = \[).*?(\];)',
+                    f'\\g<1>\n{inner}\n\\g<2>', html, flags=re.DOTALL)
+    if fecha_str:
+        html = re.sub(r'(<em id="last-updated">)[^<]*(</em>)',
+                      f'\\g<1>{fecha_str}\\g<2>', html)
+    return html
 
 def run():
     if not API_KEY:
-        print("ERROR: ANTHROPIC_API_KEY no configurada")
-        sys.exit(1)
+        print("ERROR: ANTHROPIC_API_KEY no configurada"); sys.exit(1)
 
-    now    = datetime.now(COLOMBIA_TZ)
-    start  = now - timedelta(days=30)
-    fecha  = f"{now.day} {MESES[now.month]} {now.year}"
-    inicio = f"{start.day} {MESES[start.month]} {start.year}"
+    now   = datetime.now(COLOMBIA_TZ)
+    today = now.date()
+    start = today - timedelta(days=EVENT_WINDOW_DAYS)
+    fecha = f"{now.day} {MESES[now.month]} {now.year}"
+    inicio= f"{start.day} {MESES[start.month]} {start.year}"
 
-    print(f"Actualizacion CoH: {fecha} | Ventana: {inicio} a {fecha}")
+    print(f"Actualizacion CoH: {fecha}")
+    print(f"Ventana activa: {inicio} a {fecha}")
 
     if not HTML_FILE.exists():
-        print(f"ERROR: {HTML_FILE} no encontrado")
-        sys.exit(1)
+        print(f"ERROR: {HTML_FILE} no encontrado"); sys.exit(1)
 
     html = HTML_FILE.read_text(encoding='utf-8')
 
+    # Load existing municipalities
     existing_munis = []
     em = re.search(r'const MUNIS = \[(.*?)\];', html, re.DOTALL)
     if em:
         try:
             existing_munis = json.loads('[' + em.group(1) + ']')
-            print(f"Base: {len(existing_munis)} municipios")
+            print(f"Base cargada: {len(existing_munis)} municipios")
         except Exception as e:
             print(f"No se pudo leer MUNIS: {e}")
 
     by_name = {m['n']: m for m in existing_munis}
-    before  = {k: dict(v) for k, v in by_name.items()}
+    before  = {k: dict(v) for k,v in by_name.items()}
 
+    # Seed GREEN baseline
     for g in GREEN_BASELINE:
         if g['n'] not in by_name:
-            by_name[g['n']] = make_green(g)
-    print(f"Con base VERDE: {len(by_name)} municipios")
+            by_name[g['n']] = make_green(g, today)
 
+    # Step 1: Expire old events FIRST - before AI search
+    for name in list(by_name.keys()):
+        old_zone  = by_name[name].get('r','green')
+        old_count = len(by_name[name].get('events',[]))
+        by_name[name] = recalculate(by_name[name], today)
+        new_count = len(by_name[name].get('events',[]))
+        if old_count != new_count:
+            print(f"  Expirado: {name} — {old_count-new_count} evento(s) eliminado(s) "
+                  f"| zona: {old_zone} -> {by_name[name].get('r','')}")
+
+    # Step 2: AI search for new events
     client = anthropic.Anthropic(api_key=API_KEY)
     resp = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=16000,
         system=SYSTEM,
         messages=[{"role":"user","content":
-            f"Hoy es {fecha}. Busca TODOS los eventos de seguridad en Colombia "
-            f"del {inicio} al {fecha} usando: Indepaz, ACLED, OCHA, Crisis Group, "
-            f"Defensoria del Pueblo, El Tiempo, El Colombiano, W Radio, Semana. "
-            f"Aplica la rubrica CoH a cada municipio. "
-            f"Incluye ciudades estables sin eventos (ev_pts=[], ev_count=0). "
-            f"Cubre TODAS las regiones colombianas. Devuelve 70-80 municipios. "
-            f"TODOS los textos en ESPANOL. Campo 'i' maximo 90 caracteres. "
-            f"Devuelve SOLO JSON comenzando con {{ terminando con }}."}],
+            f"Hoy es {fecha}. Busca eventos de seguridad en Colombia del {inicio} al {fecha} "
+            f"usando: Indepaz, ACLED, OCHA, Crisis Group, Defensoria del Pueblo, El Tiempo, "
+            f"El Colombiano, W Radio, Semana. "
+            f"IMPORTANTE: Para cada evento usa la fecha REAL de ocurrencia (YYYY-MM-DD), "
+            f"no la fecha de hoy. Cubre todas las regiones de Colombia. "
+            f"Incluye ciudades estables sin eventos (events=[]). "
+            f"70-80 municipios. Campo i maximo 90 chars. TODO en ESPANOL. "
+            f"SOLO JSON comenzando con {{ terminando con }}."}],
         tools=[{"type":"web_search_20250305","name":"web_search"}]
     )
 
-    text = "".join(b.text for b in resp.content if b.type == "text")
+    text = "".join(b.text for b in resp.content if b.type=="text")
     if not text:
-        print("Sin respuesta - manteniendo datos existentes")
+        print("Sin respuesta IA - guardando datos con eventos expirados")
+        HTML_FILE.write_text(write_html(html,by_name,fecha),encoding='utf-8')
         return
 
-    j0 = text.find('{')
-    j1 = text.rfind('}')
-    if j0 == -1 or j1 == -1:
-        print("Sin JSON - manteniendo datos existentes")
+    j0=text.find('{'); j1=text.rfind('}')
+    if j0==-1 or j1==-1:
+        print("Sin JSON - guardando datos con eventos expirados")
+        HTML_FILE.write_text(write_html(html,by_name,fecha),encoding='utf-8')
         return
 
     try:
         data = json.loads(text[j0:j1+1])
     except json.JSONDecodeError as e:
-        print(f"Error JSON: {e} - manteniendo datos")
+        print(f"Error JSON: {e} - guardando datos con eventos expirados")
+        HTML_FILE.write_text(write_html(html,by_name,fecha),encoding='utf-8')
         return
 
     if not data.get('municipios'):
-        print("Sin municipios - manteniendo datos")
+        HTML_FILE.write_text(write_html(html,by_name,fecha),encoding='utf-8')
         return
 
-    print(f"IA devolvio {len(data['municipios'])} municipios - aplicando rubrica CoH...")
-    ai_munis = enforce_coh_rubric(data['municipios'])
+    # Step 3: Merge AI events with existing dated events
+    print(f"IA devolvio {len(data['municipios'])} municipios - fusionando con historial...")
+    updated=added=0
 
-    updated = added = 0
-    for m in ai_munis:
-        adj  = m.get('adjusted_score', 0)
-        name = m['n']
+    for ai_m in data['municipios']:
+        name      = ai_m.get('n','')
+        ai_events = ai_m.get('events',[])
+
+        if ai_m.get('auto_red') and not ai_m.get('auto_red_date'):
+            ai_m['auto_red_date'] = ai_events[0].get('date',str(today)) if ai_events else str(today)
+
         if name in by_name:
-            if adj > 0 or m.get('auto_red'):
-                by_name[name] = m
-                updated += 1
+            ex = by_name[name]
+            ex['events'] = merge_events(ex.get('events',[]), ai_events, today)
+            ex['i'] = ai_m.get('i', ex.get('i',''))
+            ex['a'] = ai_m.get('a', ex.get('a',''))
+            if ai_m.get('auto_red'):
+                ex['auto_red']      = True
+                ex['auto_red_why']  = ai_m.get('auto_red_why','')
+                ex['auto_red_date'] = ai_m.get('auto_red_date',str(today))
+            by_name[name] = recalculate(ex, today)
+            updated += 1
         else:
-            by_name[name] = m
+            by_name[name] = recalculate(ai_m, today)
             added += 1
 
-    for m in ai_munis:
-        if m.get('adjusted_score', 0) == 0 and not m.get('auto_red'):
-            m['r']  = 'green'
-            m['sc'] = 'Puntaje ajustado: 0 | VERDE'
-            m['sz'] = 10
-            by_name[m['n']] = m
-
     merged = list(by_name.values())
-    counts = {r: sum(1 for x in merged if x.get('r') == r)
+    counts = {r: sum(1 for x in merged if x.get('r')==r)
               for r in ('red','orange','yellow','green')}
     print(f"Actualizado:{updated} Nuevo:{added} Total:{len(merged)}")
     print(f"ROJO={counts['red']} NARANJA={counts['orange']} AMARILLO={counts['yellow']} VERDE={counts['green']}")
 
-    inner = json.dumps(merged, ensure_ascii=False)[1:-1]
-    html  = re.sub(r'(const MUNIS = \[).*?(\];)',
-                   f'\\g<1>\n{inner}\n\\g<2>', html, flags=re.DOTALL)
-    if data.get('fecha'):
-        html = re.sub(r'(<em id="last-updated">)[^<]*(</em>)',
-                      f'\\g<1>{data["fecha"]}\\g<2>', html)
-    HTML_FILE.write_text(html, encoding='utf-8')
+    HTML_FILE.write_text(write_html(html,by_name,data.get('fecha',fecha)),encoding='utf-8')
     print(f"EXITO: index.html actualizado - {fecha}")
 
-    after = {m['n']: m for m in merged}
+    after = {m['n']:m for m in merged}
     send_email(fecha, before, after, counts)
 
 if __name__ == "__main__":
