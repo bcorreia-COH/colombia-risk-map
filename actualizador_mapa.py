@@ -65,16 +65,17 @@ def parse_event_date(date_str):
         return date.today()
 
 def normalize_name(name):
-    """Normalize municipality names to prevent accent-based duplicates.
-    'Cajibío' and 'Cajibio' should match the same entry."""
-    replacements = {
-        'á':'a','é':'e','í':'i','ó':'o','ú':'u','ü':'u','ñ':'n',
-        'Á':'A','É':'E','Í':'I','Ó':'O','Ú':'U','Ü':'U','Ñ':'N'
-    }
-    result = name
-    for accented, plain in replacements.items():
-        result = result.replace(accented, plain)
-    return result.strip()
+    """Strip accents and parenthetical disambiguation so names match AI output."""
+    import re as _re
+    s = _re.sub(r'\s*\([^)]*\)', '', str(name))  # remove (Narino), (Cauca) etc
+    for a, p in [('á','a'),('é','e'),('í','i'),('ó','o'),('ú','u'),('ü','u'),('ñ','n'),
+                 ('Á','A'),('É','E'),('Í','I'),('Ó','O'),('Ú','U'),('Ü','U'),('Ñ','N')]:
+        s = s.replace(a, p)
+    return s.strip().lower()  # lowercase for reliable matching
+
+def muni_key(name, dept):
+    """Unique key using both name and department to handle same-name municipalities."""
+    return normalize_name(name) + '|' + normalize_name(dept)
 
 def event_is_active(event, today):
     d = parse_event_date(event.get('date',''))
@@ -276,11 +277,11 @@ FOCUS_MUNICIPALITIES = [
   {"n":"Rosas",               "d":"Cauca","lat":2.2600,"lng":-76.7200,"a":"FARC-EMC Frente Jaime Martinez / Frente 6"},
   {"n":"Argelia",             "d":"Cauca","lat":1.8800,"lng":-77.2300,"a":"FARC-EMC Frente 6 / Segunda Marquetalia"},
   {"n":"Almaguer",            "d":"Cauca","lat":1.9167,"lng":-76.8333,"a":"FARC-EMC Frente 6"},
-  {"n":"Bolivar (Cauca)",     "d":"Cauca","lat":1.8611,"lng":-76.9611,"a":"FARC-EMC Frente 6"},
+  {"n":"Bolivar",     "d":"Cauca","lat":1.8611,"lng":-76.9611,"a":"FARC-EMC Frente 6"},
   {"n":"San Sebastian",       "d":"Cauca","lat":1.7800,"lng":-76.8100,"a":"FARC-EMC Frente 6"},
-  {"n":"Santa Rosa (Cauca)",  "d":"Cauca","lat":1.6700,"lng":-76.7900,"a":"FARC-EMC Frente 6"},
+  {"n":"Santa Rosa",  "d":"Cauca","lat":1.6700,"lng":-76.7900,"a":"FARC-EMC Frente 6"},
   {"n":"Sotara",              "d":"Cauca","lat":2.1700,"lng":-76.6300,"a":"FARC-EMC Frente Jaime Martinez / Frente 6"},
-  {"n":"Sucre (Cauca)",       "d":"Cauca","lat":1.9600,"lng":-76.9700,"a":"FARC-EMC Frente 6"},
+  {"n":"Sucre",       "d":"Cauca","lat":1.9600,"lng":-76.9700,"a":"FARC-EMC Frente 6"},
   {"n":"La Vega",             "d":"Cauca","lat":1.9700,"lng":-76.7700,"a":"FARC-EMC Frente 6"},
   {"n":"Purace",              "d":"Cauca","lat":2.2600,"lng":-76.4900,"a":"FARC-EMC (influencia)"},
   {"n":"Totoro",              "d":"Cauca","lat":2.5000,"lng":-76.4000,"a":"FARC-EMC Frente Dagoberto Ramos"},
@@ -290,13 +291,13 @@ FOCUS_MUNICIPALITIES = [
   {"n":"Timbiqui",            "d":"Cauca","lat":2.7700,"lng":-77.6800,"a":"FARC-EMC Segunda Marquetalia — costa Pacifica"},
   {"n":"Guapi",               "d":"Cauca","lat":2.5700,"lng":-77.8900,"a":"FARC-EMC Segunda Marquetalia — costa Pacifica"},
   {"n":"Piamonte",            "d":"Cauca","lat":0.8500,"lng":-76.5800,"a":"FARC-EMC Frente 48 — frontera Putumayo"},
-  {"n":"Florencia (Cauca)",   "d":"Cauca","lat":1.6067,"lng":-76.6133,"a":"FARC-EMC Frente 6"},
+  {"n":"Florencia del Cauca",   "d":"Cauca","lat":1.6067,"lng":-76.6133,"a":"FARC-EMC Frente 6"},
   # ── VALLE DEL CAUCA ───────────────────────────────────────────────
   {"n":"Buenaventura",        "d":"Valle del Cauca","lat":3.8831,"lng":-77.0311,"a":"FARC-EMC / AGC Clan del Golfo / redes criminales — principal puerto del Pacifico"},
   {"n":"Dagua",               "d":"Valle del Cauca","lat":3.6594,"lng":-76.6944,"a":"FARC-EMC Frente Jaime Martinez — corredor Buenaventura"},
   {"n":"Jamundi",             "d":"Valle del Cauca","lat":3.2578,"lng":-76.5369,"a":"FARC-EMC Frente Jaime Martinez"},
   {"n":"Pradera",             "d":"Valle del Cauca","lat":3.4239,"lng":-76.2406,"a":"FARC-EMC Frente Andes / Segunda Marquetalia"},
-  {"n":"Florida (Valle)",     "d":"Valle del Cauca","lat":3.3272,"lng":-76.2311,"a":"FARC-EMC Frente Andes / Segunda Marquetalia"},
+  {"n":"Florida",     "d":"Valle del Cauca","lat":3.3272,"lng":-76.2311,"a":"FARC-EMC Frente Andes / Segunda Marquetalia"},
   {"n":"Cali",                "d":"Valle del Cauca","lat":3.4516,"lng":-76.5320,"a":"FARC-EMC influencia — ciudad excluida de restriccion extranjeros"},
   {"n":"Palmira",             "d":"Valle del Cauca","lat":3.5394,"lng":-76.2983,"a":"FARC-EMC influencia — ciudad excluida de restriccion extranjeros"},
   {"n":"Yumbo",               "d":"Valle del Cauca","lat":3.5836,"lng":-76.4942,"a":"FARC-EMC / redes criminales"},
@@ -310,7 +311,7 @@ FOCUS_MUNICIPALITIES = [
   {"n":"Sevilla",             "d":"Valle del Cauca","lat":4.2681,"lng":-75.9347,"a":"Redes criminales"},
   {"n":"Caicedonia",          "d":"Valle del Cauca","lat":4.3339,"lng":-75.8331,"a":"Redes criminales"},
   {"n":"Zarzal",              "d":"Valle del Cauca","lat":4.3942,"lng":-76.0708,"a":"AGC / redes criminales"},
-  {"n":"La Union (Valle)",    "d":"Valle del Cauca","lat":4.5300,"lng":-76.1000,"a":"Redes criminales"},
+  {"n":"La Union",    "d":"Valle del Cauca","lat":4.5300,"lng":-76.1000,"a":"Redes criminales"},
   {"n":"Roldanillo",          "d":"Valle del Cauca","lat":4.4150,"lng":-76.1569,"a":"AGC Clan del Golfo / redes criminales"},
   {"n":"Toro",                "d":"Valle del Cauca","lat":4.6020,"lng":-76.0820,"a":"AGC Clan del Golfo / FARC-EMC Frente Jaime Martinez"},
   {"n":"Versalles",           "d":"Valle del Cauca","lat":4.5700,"lng":-76.2400,"a":"FARC-EMC / redes criminales"},
@@ -319,7 +320,7 @@ FOCUS_MUNICIPALITIES = [
   {"n":"Calima",              "d":"Valle del Cauca","lat":3.9300,"lng":-76.4800,"a":"FARC-EMC / redes criminales"},
   {"n":"Riofrio",             "d":"Valle del Cauca","lat":4.1200,"lng":-76.3600,"a":"FARC-EMC / redes criminales"},
   {"n":"Trujillo",            "d":"Valle del Cauca","lat":4.2300,"lng":-76.3200,"a":"FARC-EMC / redes criminales"},
-  {"n":"Bolivar (Valle)",     "d":"Valle del Cauca","lat":4.3700,"lng":-76.2300,"a":"FARC-EMC Segunda Marquetalia"},
+  {"n":"Bolivar",     "d":"Valle del Cauca","lat":4.3700,"lng":-76.2300,"a":"FARC-EMC Segunda Marquetalia"},
   {"n":"El Dovio",            "d":"Valle del Cauca","lat":4.5200,"lng":-76.2900,"a":"FARC-EMC / redes criminales"},
   {"n":"Ansermanuevo",        "d":"Valle del Cauca","lat":4.7939,"lng":-76.0311,"a":"AGC Clan del Golfo / redes criminales"},
   {"n":"El Aguila",           "d":"Valle del Cauca","lat":4.9200,"lng":-76.0600,"a":"AGC Clan del Golfo / redes criminales"},
@@ -337,7 +338,7 @@ FOCUS_MUNICIPALITIES = [
   {"n":"El Charco",           "d":"Narino","lat":2.4806,"lng":-77.9889,"a":"FARC-EMC / Segunda Marquetalia"},
   {"n":"La Tola",             "d":"Narino","lat":2.9822,"lng":-78.2258,"a":"FARC-EMC / Segunda Marquetalia — costa norte Narino"},
   {"n":"Iscuande",            "d":"Narino","lat":2.4444,"lng":-77.9786,"a":"FARC-EMC / Segunda Marquetalia"},
-  {"n":"Mosquera (Narino)",   "d":"Narino","lat":2.5100,"lng":-78.4300,"a":"FARC-EMC Segunda Marquetalia"},
+  {"n":"Mosquera",   "d":"Narino","lat":2.5100,"lng":-78.4300,"a":"FARC-EMC Segunda Marquetalia"},
   {"n":"Francisco Pizarro",   "d":"Narino","lat":1.1750,"lng":-78.7300,"a":"FARC-EMC Columna Daniel Aldana — costa norte"},
   {"n":"Ipiales",             "d":"Narino","lat":0.8294,"lng":-77.6441,"a":"FARC-EMC / Los Lobos Ecuador — zona fronteriza Ecuador"},
   {"n":"Cumbal",              "d":"Narino","lat":0.9139,"lng":-77.7892,"a":"FARC-EMC Frente 29 — resguardos indigenas frontera Ecuador"},
@@ -347,14 +348,14 @@ FOCUS_MUNICIPALITIES = [
   {"n":"Ricaurte",            "d":"Narino","lat":1.2119,"lng":-77.9844,"a":"FARC-EMC Frente 29 — corredor fronterizo Ecuador"},
   {"n":"Mallama",             "d":"Narino","lat":1.0300,"lng":-77.9700,"a":"FARC-EMC Frente 29"},
   {"n":"Samaniego",           "d":"Narino","lat":1.3444,"lng":-77.5944,"a":"FARC-EMC Columna Comuneros del Sur — epicentro Corregimiento La Albania"},
-  {"n":"Los Andes (Narino)",  "d":"Narino","lat":1.4900,"lng":-77.5300,"a":"FARC-EMC Columna Comuneros del Sur"},
+  {"n":"Los Andes",  "d":"Narino","lat":1.4900,"lng":-77.5300,"a":"FARC-EMC Columna Comuneros del Sur"},
   {"n":"Linares",             "d":"Narino","lat":1.3700,"lng":-77.4600,"a":"FARC-EMC Columna Comuneros del Sur"},
   {"n":"Ancuya",              "d":"Narino","lat":1.4200,"lng":-77.4200,"a":"FARC-EMC Columna Comuneros del Sur"},
   {"n":"El Rosario",          "d":"Narino","lat":1.5900,"lng":-77.4800,"a":"FARC-EMC Columna Comuneros del Sur"},
   {"n":"Policarpa",           "d":"Narino","lat":1.7500,"lng":-77.4500,"a":"FARC-EMC Columna Comuneros del Sur"},
   {"n":"Cumbitara",           "d":"Narino","lat":1.6600,"lng":-77.5700,"a":"FARC-EMC Columna Comuneros del Sur"},
   {"n":"La Llanada",          "d":"Narino","lat":1.5100,"lng":-77.5700,"a":"FARC-EMC"},
-  {"n":"El Tablon de Gomez",  "d":"Narino","lat":1.4200,"lng":-76.8900,"a":"FARC-EMC"},
+  {"n":"El Tablon",  "d":"Narino","lat":1.4200,"lng":-76.8900,"a":"FARC-EMC"},
   {"n":"Leiva",               "d":"Narino","lat":1.5781,"lng":-77.3494,"a":"FARC-EMC Columna Comuneros del Sur"},
   {"n":"Tuquerres",           "d":"Narino","lat":1.0850,"lng":-77.6200,"a":"FARC-EMC Frente 29 — zona andina"},
   {"n":"Guachucal",           "d":"Narino","lat":0.9800,"lng":-77.6900,"a":"FARC-EMC — resguardos indigenas frontera Ecuador"},
@@ -370,15 +371,15 @@ FOCUS_MUNICIPALITIES = [
   {"n":"Consaca",             "d":"Narino","lat":1.2500,"lng":-77.4600,"a":"FARC-EMC (zona de influencia)"},
   {"n":"Chachagui",           "d":"Narino","lat":1.3600,"lng":-77.2800,"a":"Redes criminales (influencia)"},
   {"n":"Buesaco",             "d":"Narino","lat":1.3800,"lng":-77.1600,"a":"FARC-EMC / Segunda Marquetalia"},
-  {"n":"San Bernardo (Nar.)", "d":"Narino","lat":1.5100,"lng":-76.9700,"a":"FARC-EMC Segunda Marquetalia"},
+  {"n":"San Bernardo", "d":"Narino","lat":1.5100,"lng":-76.9700,"a":"FARC-EMC Segunda Marquetalia"},
   {"n":"La Cruz",             "d":"Narino","lat":1.5900,"lng":-76.9700,"a":"FARC-EMC Segunda Marquetalia"},
   {"n":"Alban",               "d":"Narino","lat":1.4500,"lng":-77.4000,"a":"FARC-EMC (influencia)"},
   {"n":"Taminango",           "d":"Narino","lat":1.5700,"lng":-77.2700,"a":"FARC-EMC"},
   {"n":"Arboleda",            "d":"Narino","lat":1.6500,"lng":-77.0900,"a":"FARC-EMC / Segunda Marquetalia"},
-  {"n":"San Pablo (Narino)",  "d":"Narino","lat":1.6900,"lng":-76.9600,"a":"FARC-EMC Segunda Marquetalia"},
-  {"n":"Colon (Narino)",      "d":"Narino","lat":1.4800,"lng":-76.9500,"a":"FARC-EMC Segunda Marquetalia"},
-  {"n":"Providencia (Nar.)",  "d":"Narino","lat":1.5400,"lng":-76.9000,"a":"FARC-EMC"},
-  {"n":"Belen (Narino)",      "d":"Narino","lat":1.5900,"lng":-76.8500,"a":"FARC-EMC"},
+  {"n":"San Pablo",  "d":"Narino","lat":1.6900,"lng":-76.9600,"a":"FARC-EMC Segunda Marquetalia"},
+  {"n":"Colon",      "d":"Narino","lat":1.4800,"lng":-76.9500,"a":"FARC-EMC Segunda Marquetalia"},
+  {"n":"Providencia",  "d":"Narino","lat":1.5400,"lng":-76.9000,"a":"FARC-EMC"},
+  {"n":"Belen",      "d":"Narino","lat":1.5900,"lng":-76.8500,"a":"FARC-EMC"},
 ]
 
 # Email
@@ -501,7 +502,8 @@ Meta, Guaviare, Vichada: conflictos fronterizos y FARC
 Ciudades estables (sin eventos): Bogota, Barranquilla, Cartagena, Santa Marta, Bucaramanga, Armenia, Pereira, Manizales, Tunja
 
 Devuelve SOLO JSON valido. Sin preambulo. Sin markdown. Comienza con { termina con }.
-Entre 70 y 85 municipios. Campo i maximo 90 caracteres.
+SOLO municipios donde encontraste eventos verificados. Sin municipios sin eventos.
+Maximo 5 eventos por municipio. Campo i maximo 60 caracteres.
 
 {
   "fecha": "DD Mmm YYYY",
@@ -565,17 +567,17 @@ def run():
         except Exception as e:
             print(f"No se pudo leer MUNIS: {e}")
 
-    by_name = {normalize_name(m['n']): m for m in existing_munis}
+    by_name = {muni_key(m['n'], m.get('d','')): m for m in existing_munis}
     before  = {k: dict(v) for k,v in by_name.items()}
 
     # Seed GREEN baseline (rest of country)
     for g in GREEN_BASELINE:
-        if normalize_name(g['n']) not in by_name:
-            by_name[normalize_name(g['n'])] = make_green(g, today)
+        if muni_key(g['n'], g['d']) not in by_name:
+            by_name[muni_key(g['n'], g['d'])] = make_green(g, today)
 
     # Seed ALL focus department municipalities (Cauca/Valle/Narino)
     for f in FOCUS_MUNICIPALITIES:
-        nkey = normalize_name(f['n'])
+        nkey = muni_key(f['n'], f['d'])
         if nkey not in by_name:
             by_name[nkey] = make_focus_muni(f, today)
         else:
@@ -587,54 +589,51 @@ def run():
 
     # Step 0: Migrate old-format municipalities to new dated events format
     migrated = 0
-    for name in list(by_name.keys()):
-        m = by_name[name]
+    for _mkey in list(by_name.keys()):
+        m = by_name[_mkey]
         if 'events' not in m and m.get('ev_pts'):
-            by_name[name] = migrate_if_needed(m, today)
+            by_name[_mkey] = migrate_if_needed(m, today)
             migrated += 1
     if migrated:
         print(f"  Migrado: {migrated} municipios de formato antiguo a nuevo")
 
     # Step 1: Expire old events FIRST - before AI search
-    for name in list(by_name.keys()):
-        old_zone  = by_name[name].get('r','green')
-        old_count = len(by_name[name].get('events',[]))
-        by_name[name] = recalculate(by_name[name], today)
-        new_count = len(by_name[name].get('events',[]))
+    for _mkey in list(by_name.keys()):
+        _mname    = by_name[_mkey].get('n', _mkey)
+        old_zone  = by_name[_mkey].get('r','green')
+        old_count = len(by_name[_mkey].get('events',[]))
+        by_name[_mkey] = recalculate(by_name[_mkey], today)
+        new_count = len(by_name[_mkey].get('events',[]))
         if old_count != new_count:
-            print(f"  Expirado: {name} — {old_count-new_count} evento(s) eliminado(s) "
-                  f"| zona: {old_zone} -> {by_name[name].get('r','')}")
+            print(f"  Expirado: {_mname} — {old_count-new_count} evento(s) | {old_zone} -> {by_name[_mkey].get('r','')}")
 
-    # Step 2: AI search for new events
-    # Use streaming — required when max_tokens > threshold (avoids 10-min timeout error)
+    # Step 2: AI search — only return municipalities WHERE EVENTS WERE FOUND.
+    # Focus dept municipalities are already seeded as white/green — no need to list empties.
+    # Keeping output small avoids token limits and streaming complexity.
     client = anthropic.Anthropic(api_key=API_KEY)
     user_msg = (
-        f"Hoy es {fecha}. Busca SISTEMATICAMENTE eventos de seguridad y conflicto armado "
-        f"en Colombia de los ultimos 60 dias ({str(today - timedelta(days=60))} al {fecha}). "
-        f"Para Cauca, Valle del Cauca y Narino busca hasta 60 dias atras. "
-        f"Para el resto del pais busca los ultimos 30 dias ({inicio} al {fecha}). "
-        f"Fuentes: Indepaz, ACLED, OCHA, Crisis Group, Defensoria del Pueblo Colombia, "
-        f"El Tiempo, El Colombiano, El Espectador, W Radio, Semana, Caracol, RCN. "
-        f"CRITICO: Usa la fecha REAL de cada evento (YYYY-MM-DD), no la fecha de hoy. "
-        f"Busca evento por evento, municipio por municipio, en los departamentos "
-        f"mas afectados: Cauca, Narino, Valle del Cauca, Antioquia, Choco, "
-        f"Norte de Santander, Arauca, Putumayo, Caqueta, Huila, Tolima. "
-        f"Para cada municipio en la lista prioritaria, verifica si hubo eventos "
-        f"en los ultimos 30 dias y registra cada uno por separado con su fecha exacta. "
-        f"Incluye municipios estables sin eventos (events=[]). "
-        f"Entre 70 y 85 municipios total. Campo i maximo 90 chars. TODO en ESPANOL. "
+        f"Hoy es {fecha}. Busca eventos de conflicto armado en Colombia "
+        f"del {inicio} al {fecha}. "
+        f"Fuentes: Indepaz, ACLED, OCHA, Defensoria del Pueblo, El Tiempo, "
+        f"El Colombiano, W Radio, Semana, Caracol. "
+        f"Devuelve SOLO los municipios donde encontraste al menos un evento verificado. "
+        f"NO incluyas municipios sin eventos. "
+        f"Para cada evento usa la fecha REAL de ocurrencia (YYYY-MM-DD), no la fecha de hoy. "
+        f"Cubre todo Colombia: Cauca, Narino, Valle del Cauca, Antioquia, Choco, "
+        f"Norte de Santander, Arauca, Putumayo, Caqueta, Huila, Tolima, Meta, Guaviare. "
+        f"Maximo 5 eventos por municipio. Campo i maximo 60 chars. TODO en ESPANOL. "
         f"Devuelve SOLO JSON valido comenzando con {{ terminando con }}."
     )
-    with client.messages.stream(
+    resp = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=32000,
+        max_tokens=8000,
         system=SYSTEM,
         messages=[{"role": "user", "content": user_msg}],
         tools=[{"type": "web_search_20250305", "name": "web_search"}]
-    ) as stream:
-        resp = stream.get_final_message()
+    )
 
     text = "".join(b.text for b in resp.content if b.type == "text")
+    print(f"Respuesta IA: {len(text)} caracteres, bloques: {len(resp.content)}")
     if not text:
         print("Sin respuesta IA - guardando datos con eventos expirados")
         HTML_FILE.write_text(write_html(html,by_name,fecha),encoding='utf-8')
@@ -683,7 +682,7 @@ def run():
 
     for ai_m in data['municipios']:
         name      = ai_m.get('n','')
-        nkey      = normalize_name(name)
+        nkey      = muni_key(name, ai_m.get('d',''))
         ai_events = ai_m.get('events',[])
 
         if ai_m.get('auto_red') and not ai_m.get('auto_red_date'):
@@ -708,6 +707,8 @@ def run():
     counts = {r: sum(1 for x in merged if x.get('r')==r)
               for r in ('red','orange','yellow','green')}
     print(f"Actualizado:{updated} Nuevo:{added} Total:{len(merged)}")
+    if updated == 0 and added == 0:
+        print("AVISO: Ningun municipio actualizado — verifica que el JSON de la IA tenga datos")
     print(f"ROJO={counts['red']} NARANJA={counts['orange']} AMARILLO={counts['yellow']} VERDE={counts['green']}")
 
     HTML_FILE.write_text(write_html(html,by_name,data.get('fecha',fecha)),encoding='utf-8')
