@@ -583,8 +583,8 @@ def run():
         else:
             # Mark existing ones as focus dept and update structure info
             by_name[nkey]['focus_dept'] = True
-            if not by_name[f['n']].get('a') or by_name[f['n']]['a'] == 'N/A - monitoreo rutinario':
-                by_name[f['n']]['a'] = f.get('a','')
+            if not by_name[nkey].get('a') or by_name[nkey]['a'] == 'N/A - monitoreo rutinario':
+                by_name[nkey]['a'] = f.get('a','')
     print(f"  Focus depts seeded: {len(FOCUS_MUNICIPALITIES)} municipios (Cauca/Valle del Cauca/Narino)")
 
     # Step 0: Migrate old-format municipalities to new dated events format
