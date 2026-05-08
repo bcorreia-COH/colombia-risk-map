@@ -14,7 +14,7 @@ API_KEY     = os.environ.get("ANTHROPIC_API_KEY", "")
 MESES       = {1:'ene',2:'feb',3:'mar',4:'abr',5:'may',6:'jun',
                7:'jul',8:'ago',9:'sep',10:'oct',11:'nov',12:'dic'}
 
-SYSTEM = """You are a humanitarian security analyst for Colombia. Search for recent armed conflict news and return ONLY a valid JSON object with this exact structure - no markdown, no extra text:
+SYSTEM = """You are a humanitarian security analyst for Colombia. Search for recent armed conflict news and return ONLY a valid JSON object with this exact structure - no markdown, no preamble, no extra text, start your response with { and end with }:
 {
   "fecha": "DD Mmm YYYY",
   "municipios": [
@@ -24,18 +24,18 @@ SYSTEM = """You are a humanitarian security analyst for Colombia. Search for rec
     {"nombre":"Road name","r":"red","c":[[lat1,lng1],[lat2,lng2]]}
   ]
 }
-Risk levels: red=active combat, orange=foreigners restricted (restricted departments only), yellow=cautionary, green=permissive.
-CRITICAL: All Colombian municipalities outside the Amazon border area have POSITIVE latitudes. Cauca, Valle del Cauca, Narino are all north of the equator."""
+Risk levels: red=active combat, orange=foreigners restricted, yellow=cautionary, green=permissive.
+CRITICAL: Colombian municipalities have POSITIVE latitudes. Cauca, Valle del Cauca, Narino are north of the equator."""
 
 def run():
     if not API_KEY:
         print("ERROR: ANTHROPIC_API_KEY not set")
         sys.exit(1)
 
-    now   = datetime.now(COLOMBIA_TZ)
-    start = now - timedelta(days=30)
-    fecha = f"{now.day} {MESES[now.month]} {now.year}"
-    inicio= f"{start.day} {MESES[start.month]} {start.year}"
+    now    = datetime.now(COLOMBIA_TZ)
+    start  = now - timedelta(days=30)
+    fecha  = f"{now.day} {MESES[now.month]} {now.year}"
+    inicio = f"{start.day} {MESES[start.month]} {start.year}"
 
     print(f"Running update: {fecha}")
     client = anthropic.Anthropic(api_key=API_KEY)
@@ -47,21 +47,22 @@ def run():
         messages=[{"role":"user","content":
             f"Today is {fecha}. Search for Colombia armed conflict incidents from {inicio} to {fecha}. "
             f"Focus on Cauca, Narino, Valle del Cauca but include all active zones. "
-            f"Return updated JSON with at least 60 municipalities classified by risk level."}],
+            f"Return ONLY the JSON object. Start your response with {{ and end with }}. No other text."}],
         tools=[{"type":"web_search_20250305","name":"web_search"}]
     )
 
-    text = "".join(b.text for b in resp.content if b.type=="text")
+    text = "".join(b.text for b in resp.content if b.type == "text")
     if not text:
         print("No text response received")
         sys.exit(1)
 
-    clean = re.sub(r'^```(?:json)?\s*','',text.strip())
-clean = re.sub(r'\s*```$','',clean)
-json_start = clean.find('{')
-json_end = clean.rfind('}')
-if json_start != -1 and json_end != -1:
-    clean = clean[json_start:json_end+1]
+    # Extract JSON from response even if there is surrounding text
+    json_start = text.find('{')
+    json_end   = text.rfind('}')
+    if json_start == -1 or json_end == -1:
+        print(f"No JSON found in response: {text[:300]}")
+        sys.exit(1)
+    clean = text[json_start:json_end+1]
 
     try:
         data = json.loads(clean)
@@ -81,12 +82,12 @@ if json_start != -1 and json_end != -1:
                       f'\\g<1>{data["fecha"]}\\g<2>', html)
 
     if data.get('municipios'):
-        inner = json.dumps(data['municipios'],ensure_ascii=False)[1:-1]
+        inner = json.dumps(data['municipios'], ensure_ascii=False)[1:-1]
         html  = re.sub(r'(const MUNIS = \[).*?(\];)',
                        f'\\g<1>\n{inner}\n\\g<2>', html, flags=re.DOTALL)
 
     if data.get('vias'):
-        inner = json.dumps(data['vias'],ensure_ascii=False)[1:-1]
+        inner = json.dumps(data['vias'], ensure_ascii=False)[1:-1]
         html  = re.sub(r'(const SEGMENTS = \[).*?(\];)',
                        f'\\g<1>\n{inner}\n\\g<2>', html, flags=re.DOTALL)
 
