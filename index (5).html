@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mapa de Riesgo — Conflicto Armado Colombia | Convoy of Hope</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600;700&display=swap');
+:root{
+  --red:#dc2626;--red-s:#ef4444;--red-bg:rgba(220,38,38,0.14);
+  --orange:#ea580c;--orange-s:#f97316;--orange-bg:rgba(234,88,12,0.12);
+  --yellow:#ca8a04;--yellow-s:#facc15;--yellow-bg:rgba(250,204,21,0.12);
+  --green:#15803d;--green-s:#16a34a;--green-bg:rgba(21,128,61,0.12);
+  --white:#9ca3af;--white-bg:rgba(156,163,175,0.08);
+  --panel:rgba(8,15,30,0.93);--panel-s:#080f1e;
+  --border:rgba(148,163,184,0.2);--text:#f0f6ff;--muted:#8faabb;--accent:#38bdf8;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'IBM Plex Sans',sans-serif;background:var(--panel-s);height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+header{background:var(--panel-s);border-bottom:1px solid var(--border);padding:9px 18px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;z-index:1000;}
+.hL{display:flex;align-items:center;gap:12px;}
+.badge{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);padding:3px 8px;border-radius:2px;}
+h1{font-size:13px;font-weight:700;color:var(--text);}
+.sub{font-size:10px;color:var(--muted);margin-top:1px;}
+.hR{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);text-align:right;line-height:1.7;}
+.hR em{color:#f87171;font-style:normal;}
+.utag{display:inline-block;background:rgba(56,189,248,.1);border:1px solid rgba(56,189,248,.3);color:var(--accent);font-family:'IBM Plex Mono',monospace;font-size:8px;padding:2px 6px;border-radius:2px;margin-left:5px;}
+#map{flex:1;background:#0a1223;}
+/* Leaflet */
+.leaflet-popup-content-wrapper{background:rgba(8,15,30,.97)!important;border:1px solid rgba(148,163,184,.22)!important;border-radius:6px!important;box-shadow:0 8px 40px rgba(0,0,0,.75)!important;color:var(--text)!important;font-family:'IBM Plex Sans',sans-serif!important;}
+.leaflet-popup-tip{background:rgba(8,15,30,.97)!important;}
+.leaflet-popup-content{margin:13px 15px!important;max-width:320px!important;}
+.leaflet-control-zoom{border:1px solid var(--border)!important;border-radius:4px!important;overflow:hidden;}
+.leaflet-control-zoom a{background:var(--panel-s)!important;color:var(--text)!important;border-bottom:1px solid var(--border)!important;line-height:28px!important;width:28px!important;height:28px!important;}
+.leaflet-control-zoom a:hover{background:rgba(56,189,248,.1)!important;color:var(--accent)!important;}
+.leaflet-control-attribution{background:rgba(8,15,30,.75)!important;color:var(--muted)!important;font-size:9px!important;padding:2px 6px!important;}
+.leaflet-control-attribution a{color:var(--accent)!important;}
+/* Popup */
+.ph{display:flex;align-items:flex-start;gap:8px;margin-bottom:9px;padding-bottom:9px;border-bottom:1px solid rgba(148,163,184,.12);}
+.rp{font-family:'IBM Plex Mono',monospace;font-size:8px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:3px 7px;border-radius:2px;white-space:nowrap;margin-top:1px;flex-shrink:0;}
+.rp.r{background:rgba(220,38,38,.2);color:#f87171;border:1px solid #dc2626;}
+.rp.o{background:rgba(234,88,12,.2);color:#fb923c;border:1px solid #ea580c;}
+.rp.y{background:rgba(202,138,4,.15);color:#fde047;border:1px solid #ca8a04;}
+.rp.g{background:rgba(21,128,61,.2);color:#4ade80;border:1px solid #15803d;}
+.rp.w{background:rgba(156,163,175,.1);color:#9ca3af;border:1px dashed #9ca3af;}
+.pm{font-size:13px;font-weight:700;color:#f0f6ff;line-height:1.2;}
+.pd{font-size:10px;color:var(--muted);margin-top:1px;}
+.pb{font-size:11px;line-height:1.65;color:#c8d8e8;}
+.pa{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);margin-top:7px;}
+.pp{font-size:10px;color:var(--muted);margin-top:6px;font-style:italic;border-top:1px solid rgba(148,163,184,.1);padding-top:6px;}
+/* Controls */
+.ctrl{position:absolute;top:12px;left:12px;z-index:900;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:10px 12px;backdrop-filter:blur(16px);box-shadow:0 4px 24px rgba(0,0,0,.55);min-width:158px;}
+.ct{font-family:'IBM Plex Mono',monospace;font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;}
+.cb{display:block;width:100%;padding:5px 9px;margin-bottom:3px;border-radius:3px;border:1px solid var(--border);background:transparent;color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:9px;cursor:pointer;text-align:left;transition:all .15s;}
+.cb:last-child{margin-bottom:0;}
+.cb:hover{color:var(--accent);border-color:var(--accent);}
+.cb.ac{color:var(--accent);border-color:var(--accent);background:rgba(56,189,248,.08);}
+.cb.ar{color:#f87171;border-color:var(--red);background:var(--red-bg);}
+.cb.ao{color:#fb923c;border-color:var(--orange);background:var(--orange-bg);}
+.cb.ay{color:#fde047;border-color:var(--yellow);background:var(--yellow-bg);}
+.cb.ag{color:#4ade80;border-color:var(--green);background:var(--green-bg);}
+.cb.aw{color:#9ca3af;border-color:var(--white);background:var(--white-bg);}
+.cb.aw{color:#9ca3af;border-color:var(--white);background:var(--white-bg);}
+.csep{border-top:1px solid var(--border);margin:7px 0;}
+/* Stats */
+.stats{position:absolute;top:12px;right:12px;z-index:900;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:9px 13px;display:flex;gap:13px;backdrop-filter:blur(16px);box-shadow:0 4px 24px rgba(0,0,0,.55);}
+.st{text-align:center;}
+.sn{font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:700;display:block;line-height:1;}
+.sl{font-family:'IBM Plex Mono',monospace;font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;}
+.sr .sn{color:#f87171;}.so .sn{color:#fb923c;}.sy .sn{color:#fde047;}.sg .sn{color:#4ade80;}.sw .sn{color:#9ca3af;}
+.sw .sn{color:#9ca3af;}
+/* Legend */
+.leg{position:absolute;bottom:28px;right:12px;z-index:900;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:12px 14px;width:248px;backdrop-filter:blur(16px);box-shadow:0 4px 24px rgba(0,0,0,.55);}
+.lt{font-family:'IBM Plex Mono',monospace;font-size:8px;color:var(--accent);text-transform:uppercase;letter-spacing:.12em;margin-bottom:8px;}
+.lr{display:flex;align-items:flex-start;gap:9px;margin-bottom:6px;}
+.ld{width:11px;height:11px;border-radius:50%;flex-shrink:0;margin-top:2px;border:2px solid;}
+.ld.r{background:rgba(220,38,38,.25);border-color:#dc2626;}
+.ld.o{background:rgba(234,88,12,.22);border-color:#ea580c;}
+.ld.y{background:rgba(234,179,8,.22);border-color:#ca8a04;}
+.ld.g{background:rgba(21,128,61,.20);border-color:#15803d;}
+.ld.w{background:rgba(156,163,175,.10);border:1.5px dashed #9ca3af;}
+.ll{font-size:11px;color:var(--text);font-weight:700;}
+.lx{font-size:9px;color:var(--muted);line-height:1.4;}
+.ls{border:none;border-top:1px solid var(--border);margin:8px 0;}
+.lro{display:flex;align-items:center;gap:9px;margin-bottom:5px;}
+.lin{width:26px;height:3px;border-radius:1px;flex-shrink:0;}
+.lsrc{font-size:8px;color:var(--muted);line-height:1.6;margin-top:4px;}
+.lnote{font-size:8px;color:var(--accent);font-family:'IBM Plex Mono',monospace;margin-top:6px;padding-top:6px;border-top:1px solid var(--border);}
+/* Road loading indicator */
+#road-status{position:absolute;bottom:28px;left:12px;z-index:900;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 12px;backdrop-filter:blur(16px);font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);display:flex;align-items:center;gap:8px;}
+.rspin{width:10px;height:10px;border:2px solid rgba(56,189,248,.2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.dept-tip{background:transparent!important;border:none!important;box-shadow:none!important;font-family:'IBM Plex Mono',monospace!important;font-size:10px!important;color:rgba(255,255,255,.85)!important;font-weight:600!important;text-shadow:0 1px 3px rgba(0,0,0,.95)!important;padding:1px!important;}
+
+/* ── MOBILE RESPONSIVE ─────────────────────────────── */
+/* Mobile stats strip */
+#mob-stats{
+  display:none;position:absolute;top:0;left:0;right:0;z-index:900;
+  background:rgba(8,15,30,.93);padding:8px 16px;
+  justify-content:space-around;backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);
+}
+.msn{font-family:'IBM Plex Mono',monospace;font-size:15px;
+  font-weight:700;text-align:center;}
+.msl{font-family:'IBM Plex Mono',monospace;font-size:8px;
+  color:var(--muted);letter-spacing:.08em;display:block;}
+/* Mobile bottom tab bar */
+#mob-bar{
+  display:none;position:absolute;bottom:0;left:0;right:0;z-index:1000;
+  background:rgba(8,15,30,.97);border-top:1px solid var(--border);
+  padding:8px 0 env(safe-area-inset-bottom,8px);
+  justify-content:space-around;backdrop-filter:blur(16px);
+}
+.mob-tab{
+  flex:1;display:flex;flex-direction:column;align-items:center;
+  gap:3px;padding:6px 4px;cursor:pointer;border:none;
+  background:transparent;color:var(--muted);
+  font-family:'IBM Plex Mono',monospace;font-size:9px;
+  letter-spacing:.06em;text-transform:uppercase;
+  transition:color .15s;
+}
+.mob-tab:hover,.mob-tab.active{color:var(--accent);}
+.mob-tab-icon{font-size:18px;line-height:1;}
+/* Mobile slide-up sheets */
+.mob-sheet{
+  display:none;position:absolute;bottom:0;left:0;right:0;z-index:999;
+  background:rgba(8,15,30,.98);border-top:1px solid var(--border);
+  border-radius:14px 14px 0 0;max-height:70vh;overflow-y:auto;
+  padding:16px 16px calc(70px + env(safe-area-inset-bottom,0px));
+  box-shadow:0 -8px 40px rgba(0,0,0,.7);
+}
+.mob-sheet.open{display:block;}
+.sheet-handle{width:40px;height:4px;background:var(--border);
+  border-radius:2px;margin:0 auto 14px;}
+.sheet-title{font-family:'IBM Plex Mono',monospace;font-size:9px;
+  color:var(--accent);text-transform:uppercase;letter-spacing:.12em;
+  margin-bottom:12px;}
+/* Mobile sheet button styles */
+.mob-sheet .cb{display:block;width:100%;padding:10px 12px;
+  margin-bottom:6px;border-radius:4px;border:1px solid var(--border);
+  background:transparent;color:var(--muted);
+  font-family:'IBM Plex Mono',monospace;font-size:11px;cursor:pointer;
+  text-align:left;transition:all .15s;}
+.mob-sheet .cb:hover{color:var(--accent);border-color:var(--accent);}
+.mob-sheet .cb.ac{color:var(--accent);border-color:var(--accent);background:rgba(56,189,248,.08);}
+.mob-sheet .cb.ar{color:#f87171;border-color:var(--red);background:var(--red-bg);}
+.mob-sheet .cb.ao{color:#fb923c;border-color:var(--orange);background:var(--orange-bg);}
+.mob-sheet .cb.ay{color:#fde047;border-color:var(--yellow);background:var(--yellow-bg);}
+.mob-sheet .cb.ag{color:#4ade80;border-color:var(--green);background:var(--green-bg);}
+.mob-sheet .cb.aw{color:#9ca3af;border-color:var(--white);background:var(--white-bg);}
+/* Sheet overlay */
+#mob-overlay{display:none;position:absolute;inset:0;z-index:998;
+  background:rgba(0,0,0,.4);}
+#mob-overlay.open{display:block;}
+@media(max-width:768px){
+  header{padding:7px 12px;}
+  .sub{display:none;}
+  .hR{display:none;}
+  .ctrl,.stats,.leg{display:none!important;}
+  #mob-stats{display:flex;}
+  #mob-bar{display:flex;}
+  #road-status{bottom:70px!important;}
+  .leaflet-popup-content-wrapper{max-width:calc(100vw - 24px)!important;}
+  .leaflet-control-zoom{bottom:80px!important;}
+  .leaflet-popup-content{margin:10px 12px!important;}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hL">
+    <div class="badge">CoH Colombia</div>
+    <div>
+      <h1>Mapa de Riesgo — Conflicto Armado en Colombia</h1>
+      <div class="sub">Nivel Municipal · Vías 25 km/zona · Enfoque: Cauca · Nariño · Valle del Cauca &nbsp;·&nbsp; Clic en cualquier punto para detalles</div>
+    </div>
+  </div>
+  <div class="hR">
+    <div>Actualizado: <em id="last-updated">07 May 2026</em> &nbsp;·&nbsp; Ventana: 07 Abr – 07 May 2026 <span class="utag">AUTO-UPDATE DOM 23:00 COT</span></div>
+    <div>CONFIDENCIAL · Solo Personal Autorizado · Plan de Contingencia CoH v2.0</div>
+  </div>
+</header>
+
+<div style="position:relative;flex:1;display:flex;flex-direction:column;">
+<div id="map"></div>
+
+<div class="ctrl">
+  <div class="ct">Mapa Base</div>
+  <button class="cb ac" id="b-hyb" onclick="setTile('hyb',this)">🗺 Híbrido</button>
+  <button class="cb"    id="b-ter" onclick="setTile('ter',this)">⛰ Terreno</button>
+  <button class="cb"    id="b-str" onclick="setTile('str',this)">🛣 Calles</button>
+  <div class="csep"></div>
+  <div class="ct">Filtrar Zona</div>
+  <button class="cb ac" onclick="fz('all',this)">● Todas las Zonas</button>
+  <button class="cb"    onclick="fz('red',this)">● ROJO — Prohibida</button>
+  <button class="cb"    onclick="fz('orange',this)">● NARANJA — Restringida</button>
+  <button class="cb"    onclick="fz('yellow',this)">● AMARILLO — Precaución</button>
+  <button class="cb"    onclick="fz('green',this)">● VERDE — Permisiva</button>
+  <button class="cb"    onclick="fz('white',this)">○ BLANCO — Sin eventos 60d (Cauca/Valle/Nariño)</button>
+</div>
+
+<div class="stats">
+  <div class="st sr"><span class="sn" id="d-r">—</span><span class="sl">ROJO</span></div>
+  <div class="st so"><span class="sn" id="d-o">—</span><span class="sl">NARANJA</span></div>
+  <div class="st sy"><span class="sn" id="d-y">—</span><span class="sl">AMARILLO</span></div>
+  <div class="st sg"><span class="sn" id="d-g">—</span><span class="sl">VERDE</span></div>
+  <div class="st sw"><span class="sn" id="d-w">—</span><span class="sl">BLANCO</span></div>
+</div>
+
+<div id="road-status"><div class="rspin"></div><span id="road-msg">Cargando rutas viales exactas…</span></div>
+
+<div class="leg">
+  <div class="lt">Clasificación de Riesgo (Criterios CoH)</div>
+  <div class="lr"><div class="ld r"></div><div><div class="ll">ROJO — Zona Prohibida</div><div class="lx">Combate activo · amenaza directa · acceso colapsado. Todo el personal suspendido.</div></div></div>
+  <div class="lr"><div class="ld o"></div><div><div class="ll">NARANJA — Restringida (extranjeros)</div><div class="lx">Personal extranjero CoH NO autorizado. Personal nacional de CoH y voluntarios locales autorizados. Solo actividades esenciales; aprobación del Director Nacional requerida.</div></div></div>
+  <div class="lr"><div class="ld y"></div><div><div class="ll">AMARILLO — Precaución</div><div class="lx">Todo el personal con protocolos reforzados. Verificación de ruta requerida. 1–2 incidentes/30d o actividad esporádica &lt;50 km.</div></div></div>
+  <div class="lr"><div class="ld g"></div><div><div class="ll">VERDE — Permisiva</div><div class="lx">Sin indicadores de conflicto activo. Operaciones estándar para todo el personal.</div></div></div>
+  <hr class="ls">
+  <div class="lt">Corredores Viales (tramo de riesgo)</div>
+  <div class="lro"><div class="lin" style="background:#ef4444;"></div><div class="lx">ROJO — Sin viajes de rutina</div></div>
+  <div class="lro"><div class="lin" style="background:#f97316;"></div><div class="lx">NARANJA — Solo actividades esenciales</div></div>
+  <div class="lro"><div class="lin" style="background:#facc15;background:repeating-linear-gradient(90deg,#facc15 0,#facc15 5px,transparent 5px,transparent 9px);"></div><div class="lx">AMARILLO — Protocolos reforzados</div></div>
+  <div class="lnote">◎ Círculos: radio de 10 km por evento<br>━ Vías: ±25 km desde zona de riesgo</div>
+  <hr class="ls">
+  <div class="lsrc">Fuentes: Indepaz · GCI · ACLED · WOLA · OCHA<br>Actores: FARC-EMC · ELN · AGC · 2ª Marquetalia</div>
+</div>
+
+<!-- Mobile compact stats bar -->
+<div id="mob-stats">
+  <div class="msn" style="color:#f87171"><span id="m-r">—</span><span class="msl">ROJO</span></div>
+  <div class="msn" style="color:#fb923c"><span id="m-o">—</span><span class="msl">NARANJA</span></div>
+  <div class="msn" style="color:#fde047"><span id="m-y">—</span><span class="msl">AMARILLO</span></div>
+  <div class="msn" style="color:#4ade80"><span id="m-g">—</span><span class="msl">VERDE</span></div>
+  <div class="msn" style="color:#9ca3af"><span id="m-w">—</span><span class="msl">BLANCO</span></div>
+</div>
+<!-- Mobile overlay (tap to close) -->
+<div id="mob-overlay" onclick="closeMobSheets()"></div>
+<!-- Sheet: Map Layers -->
+<div id="sheet-layers" class="mob-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">Mapa Base</div>
+  <button class="cb ac" id="ms-hyb" onclick="setTile('hyb',this);setMobTileBtn(this)">🗺 Híbrido</button>
+  <button class="cb"    id="ms-ter" onclick="setTile('ter',this);setMobTileBtn(this)">⛰ Terreno</button>
+  <button class="cb"    id="ms-str" onclick="setTile('str',this);setMobTileBtn(this)">🛣 Calles</button>
+</div>
+<!-- Sheet: Filter -->
+<div id="sheet-filter" class="mob-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">Filtrar Zona</div>
+  <button class="cb ac" onclick="fz('all',this);syncMobFilter(this)">● Todas las Zonas</button>
+  <button class="cb"    onclick="fz('red',this);syncMobFilter(this)">● ROJO — Prohibida</button>
+  <button class="cb"    onclick="fz('orange',this);syncMobFilter(this)">● NARANJA — Restringida</button>
+  <button class="cb"    onclick="fz('yellow',this);syncMobFilter(this)">● AMARILLO — Precaución</button>
+  <button class="cb"    onclick="fz('green',this);syncMobFilter(this)">● VERDE — Permisiva</button>
+  <button class="cb"    onclick="fz('white',this);syncMobFilter(this)">○ BLANCO — Sin eventos 60d (Cauca/Valle/Nariño)</button>
+</div>
+<!-- Sheet: Legend -->
+<div id="sheet-legend" class="mob-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">Clasificación de Riesgo</div>
+  <div class="lr" style="margin-bottom:10px"><div class="ld r" style="flex-shrink:0;margin-top:3px"></div><div><div class="ll">ROJO — Zona Prohibida</div><div class="lx">Combate activo · amenaza directa · acceso colapsado. Todo el personal suspendido.</div></div></div>
+  <div class="lr" style="margin-bottom:10px"><div class="ld o" style="flex-shrink:0;margin-top:3px"></div><div><div class="ll">NARANJA — Restringida (extranjeros)</div><div class="lx">Personal extranjero CoH NO autorizado. Personal nacional de CoH y voluntarios locales autorizados. Solo actividades esenciales; aprobación del Director Nacional requerida.</div></div></div>
+  <div class="lr" style="margin-bottom:10px"><div class="ld y" style="flex-shrink:0;margin-top:3px"></div><div><div class="ll">AMARILLO — Precaución</div><div class="lx">Todo el personal con protocolos reforzados. 1–2 incidentes/30d o actividad esporádica &lt;50 km.</div></div></div>
+  <div class="lr" style="margin-bottom:10px"><div class="ld g" style="flex-shrink:0;margin-top:3px"></div><div><div class="ll">VERDE — Permisiva</div><div class="lx">Sin indicadores de conflicto activo. Operaciones estándar para todo el personal.</div></div></div>
+  <hr class="ls" style="margin:12px 0">
+  <div class="sheet-title">Corredores Viales</div>
+  <div class="lro" style="margin-bottom:6px"><div class="lin" style="background:#ef4444;flex-shrink:0"></div><div class="lx">ROJO — Sin viajes de rutina</div></div>
+  <div class="lro" style="margin-bottom:6px"><div class="lin" style="background:#f97316;flex-shrink:0"></div><div class="lx">NARANJA — Solo actividades esenciales</div></div>
+  <div class="lro" style="margin-bottom:6px"><div class="lin" style="background:repeating-linear-gradient(90deg,#facc15 0,#facc15 5px,transparent 5px,transparent 9px);flex-shrink:0"></div><div class="lx">AMARILLO — Protocolos reforzados</div></div>
+  <div class="lr" style="margin-bottom:10px"><div class="ld w" style="flex-shrink:0;margin-top:3px"></div><div><div class="ll">BLANCO — Sin eventos 60+ dias</div><div class="lx">Solo Cauca, Valle del Cauca y Nariño. Presencia historica de grupos armados. Sin incidentes verificados en 60 dias.</div></div></div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--accent);margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+    ◎ Círculos: radio de 10 km por evento<br>
+    ━ Vías: ±25 km desde zona de riesgo<br>
+  </div>
+  <div style="font-size:9px;color:var(--muted);margin-top:8px;line-height:1.6">
+    Fuentes: Indepaz · ACLED · OCHA · Crisis Group · Defensoría<br>
+    Actores: FARC-EMC · ELN · AGC · 2ª Marquetalia
+  </div>
+</div>
+<!-- Mobile bottom tab bar -->
+<div id="mob-bar">
+  <button class="mob-tab" onclick="openMobSheet('layers')" id="tab-layers">
+    <span class="mob-tab-icon">🗺</span>Capas
+  </button>
+  <button class="mob-tab" onclick="openMobSheet('filter')" id="tab-filter">
+    <span class="mob-tab-icon">◉</span>Filtrar
+  </button>
+  <button class="mob-tab" onclick="openMobSheet('legend')" id="tab-legend">
+    <span class="mob-tab-icon">ℹ</span>Leyenda
+  </button>
+</div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// POSTURA OPERACIONAL
+// ═══════════════════════════════════════════════════════════════════
+const POSTURA = {
+  red:    'Postura CoH: Operaciones SUSPENDIDAS. Monitoreo remoto únicamente. Resguardo/hibernación/evacuación según instrucciones.',
+  orange: 'Postura CoH (NARANJA): Personal extranjero de CoH NO autorizado en esta zona. Personal nacional CoH y voluntarios locales sí están autorizados. Aplica en depts. restringidos según US State Dept: Cauca (excl. Popayán), Valle del Cauca (excl. Cali y Palmira), Nariño (excl. Pasto), Antioquia (excl. Metro Medellín), Chocó, Putumayo, Huila, Tolima, Arauca, Norte de Santander, dentro de 30 km de frontera venezolana, y Caquetá. Actividades esenciales únicamente. Revisión diaria. Reportes cada 2 horas.',
+  yellow: 'Postura CoH: Monitoreo reforzado. Visitas no esenciales aplazadas. Verificación de ruta requerida.',
+  green:  'Postura CoH: Operaciones plenas. Tablero de Viajes estándar. Monitoreo rutinario.',
+  white:  'Postura CoH (BLANCO): Sin incidentes verificados en 60+ días. Zona de presencia histórica de grupos armados — solo Cauca, Valle del Cauca y Nariño. Verificar con socios locales antes de cualquier viaje.'
+};
+const PILL = {red:'r',orange:'o',yellow:'y',green:'g',white:'w'};
+const NZ   = {red:'ROJO',orange:'NARANJA',yellow:'AMARILLO',green:'VERDE',white:'BLANCO'};
+const CSTYLE = {
+  red:    {color:'#ef4444',fillColor:'#dc2626',fillOpacity:0.18,weight:2.5,opacity:0.90},
+  orange: {color:'#f97316',fillColor:'#ea580c',fillOpacity:0.16,weight:2.2,opacity:0.88},
+  yellow: {color:'#facc15',fillColor:'#eab308',fillOpacity:0.20,weight:2.2,opacity:0.90},
+  green:  {color:'#16a34a',fillColor:'#15803d',fillOpacity:0.14,weight:1.8,opacity:0.82},
+  white:  {color:'#9ca3af',fillColor:'#e5e7eb',fillOpacity:0.20,weight:1.5,opacity:0.65,dashArray:'5 4'}
+};
+const RC = {red:'#ef4444',orange:'#f97316',yellow:'#facc15',green:'#22c55e',white:'#d1d5db'};
+
+// ═══════════════════════════════════════════════════════════════════
+// MUNICIPIOS — deduplicados, coordenadas verificadas (positivas al norte)
+// ═══════════════════════════════════════════════════════════════════
+const MUNIS = [
+// ══ ROJO ══
+{n:'Cajibío',d:'Cauca',lat:2.5500,lng:-76.5578,r:'red',sc:'21/25',
+ i:'Atentado en Panamericana (Ruta 25) el 25 abr 2026. FARC-EMC Frente Jaime Martínez detonó bomba cilindro en El Túnel: 20 muertos, 36 heridos. Cráter de 10 m. Uno de 31 ataques coordinados en 4 días. Ruta bloqueada. Refuerzo de 13 pelotones acorazados y 12 de infantería.',
+ a:'FARC-EMC (Frente Jaime Martínez / Iván Mordisco)'},
+{n:'Guachené',d:'Cauca',lat:3.0869,lng:-76.4333,r:'red',sc:'20/25',
+ i:'Masacre en vereda La Cabaña (abril 2026). Frente Dagoberto Ramos ejerce control territorial. Múltiples incursiones armadas. Nodo central del clúster de conflicto del norte del Cauca.',
+ a:'FARC-EMC (Frente Dagoberto Ramos)'},
+{n:'Corinto',d:'Cauca',lat:3.1783,lng:-76.2556,r:'red',sc:'19/25',
+ i:'Carro bomba detonado en área urbana (ola de abril 2026). Parte de 26 ataques coordinados en Cauca y Valle del Cauca en 48 horas. Centro urbano afectado.',
+ a:'FARC-EMC'},
+{n:'El Tambo',d:'Cauca',lat:2.4578,lng:-76.8003,r:'red',sc:'20/25',
+ i:'Múltiples incidentes FARC-EMC en 30 días. Ataques con drones contra fuerza pública. Parte de la ofensiva coordinada de abril. Vía Popayán-Buenaventura bajo alto riesgo.',
+ a:'FARC-EMC'},
+{n:'Buenos Aires',d:'Cauca',lat:3.0167,lng:-76.6333,r:'red',sc:'21/25',
+ i:'Corazón del Cañón del Micay. Control territorial FARC-EMC. Operaciones militares sostenidas desde ago 2025. IED y minas en vías rurales. Desplazamiento forzado activo.',
+ a:'FARC-EMC (Frente Jaime Martínez)'},
+{n:'López de Micay',d:'Cauca',lat:3.1889,lng:-77.2444,r:'red',sc:'22/25',
+ i:'FARC-EMC controla casi todo el Cañón del Micay. Black Hawk derribado ago 2025. Confinamiento civil forzado. Sin presencia estatal efectiva en vastas áreas rurales. Acceso humanitario colapsado.',
+ a:'FARC-EMC'},
+{n:'Morales',d:'Cauca',lat:2.7544,lng:-76.6206,r:'red',sc:'19/25',
+ i:'Presencia armada activa de FARC-EMC. Múltiples incidentes en 30 días. Movimiento armado cerca de comunidades. Parte del clúster de conflicto del norte del Cauca.',
+ a:'FARC-EMC'},
+{n:'Toro (El Hobo)',d:'Valle del Cauca',lat:4.6020,lng:-76.0820,r:'red',sc:'20/25',
+ i:'Masacre en establecimiento El Hobo (abril 2026). Hombres armados abrieron fuego indiscriminadamente contra asistentes. Atribuida a Frente Jaime Martínez (FARC-EMC). Parte del conteo de 48 masacres de Indepaz 2026.',
+ a:'FARC-EMC (Frente Jaime Martínez)'},
+{n:'Tibú',d:'Norte de Santander',lat:8.6597,lng:-72.7302,r:'red',sc:'22/25',
+ i:'Epicentro de la crisis del Catatumbo (en curso desde ene 2026). Combates ELN-FARC, 80+ muertos. Adolescente indígena (16 años) secuestrado el 8 abr 2026. 5.000 soldados desplegados. Desplazamiento masivo activo.',
+ a:'ELN / Frente 33 FARC (EMBF)'},
+{n:'Tumaco',d:'Nariño',lat:1.8081,lng:-78.7618,r:'red',sc:'21/25',
+ i:'Bastión FARC-EMC en el Pacífico. Múltiples incidentes en 30 días. Hub del narcotráfico. Ataques con drones y asesinatos selectivos. Confinamiento comunitario forzado.',
+ a:'FARC-EMC / FARC Segunda Marquetalia'},
+{n:'Barbacoas',d:'Nariño',lat:1.6728,lng:-78.1403,r:'red',sc:'20/25',
+ i:'Control territorial activo FARC-EMC. Paros armados y confinamiento comunitario. Acceso a veredas severamente restringido. Líderes sociales bajo amenaza directa.',
+ a:'FARC-EMC'},
+{n:'El Charco',d:'Nariño',lat:2.4806,lng:-77.9889,r:'red',sc:'19/25',
+ i:'Control del corredor costero del Pacífico. Confinamiento territorial forzado. Movilidad restringida. Homicidios selectivos reportados.',
+ a:'FARC-EMC / FARC Segunda Marquetalia'},
+{n:'Olaya Herrera',d:'Nariño',lat:2.3181,lng:-78.1567,r:'red',sc:'19/25',
+ i:'Creciente presencia de grupos armados en costa Pacífica. Confinamiento comunitario. Grave riesgo de VBG y reclutamiento de menores.',
+ a:'FARC-EMC'},
+{n:'San Calixto',d:'Norte de Santander',lat:8.6667,lng:-73.1333,r:'red',sc:'20/25',
+ i:'Zona de conflicto del Catatumbo. Combates ELN-disidencias FARC. Desplazamiento forzado. Alertas tempranas de la Defensoría del Pueblo emitidas.',
+ a:'ELN / FARC-EMBF'},
+
+// ══ NARANJA ══
+{n:'Popayán',d:'Cauca',lat:2.4419,lng:-76.6072,r:'yellow',sc:'14/25',
+ i:'Capital departamental rodeada de municipios en zona ROJA. 3+ incidentes en radio de 30 km. Excluida de la restricción de extranjeros del US State Dept (ciudad capital de Cauca). Todo el personal CoH requiere protocolos reforzados y verificación de ruta.',
+ a:'FARC-EMC (zona de influencia)'},
+{n:'Miranda',d:'Cauca',lat:3.2453,lng:-76.2267,r:'orange',sc:'13/25',
+ i:'Afectado por ataques de disidencias FARC (ola de abril 2026). Movimiento armado cerca del casco urbano. Clúster norte del Cauca.',
+ a:'FARC-EMC'},
+{n:'Timbío',d:'Cauca',lat:2.3461,lng:-76.6822,r:'orange',sc:'13/25',
+ i:'Ataques registrados en la ola de abril 2026. Cerca del corredor de conflicto de la Panamericana. Elevada actividad armada en zona rural circundante.',
+ a:'FARC-EMC'},
+{n:'Patía / El Bordo',d:'Cauca',lat:2.0697,lng:-77.0731,r:'orange',sc:'14/25',
+ i:'Carro bomba detonado en abril 2026. Corredor de la Panamericana hacia Nariño. 3+ incidentes en 30 días. Extorsión al transporte comercial.',
+ a:'FARC-EMC'},
+{n:'Mercaderes',d:'Cauca',lat:1.7944,lng:-77.1878,r:'orange',sc:'12/25',
+ i:'Ataques FARC-EMC en ventana de 30 días. Corredor sur del Cauca hacia frontera con Nariño. Extorsión al transporte comercial. Control armado de vías rurales.',
+ a:'FARC-EMC'},
+{n:'Suárez',d:'Cauca',lat:2.9503,lng:-76.6611,r:'orange',sc:'13/25',
+ i:'Presencia territorial FARC-EMC. Corredor fluvial para narcotráfico. Control armado de veredas rurales. Reclutamiento forzado reportado.',
+ a:'FARC-EMC'},
+{n:'Caldono',d:'Cauca',lat:2.7967,lng:-76.4883,r:'orange',sc:'12/25',
+ i:'Presencia activa FARC-EMC en el norte del Cauca. Amenazas a líderes comunitarios. Riesgo de minas en vías rurales.',
+ a:'FARC-EMC'},
+{n:'Caloto',d:'Cauca',lat:3.0236,lng:-76.4208,r:'orange',sc:'12/25',
+ i:'Incidentes en abril 2026. Frente Dagoberto Ramos activo en la zona. Movimiento armado cerca de vías de acceso comunitario.',
+ a:'FARC-EMC (Frente Dagoberto Ramos)'},
+{n:'Santander de Quilichao',d:'Cauca',lat:3.0072,lng:-76.4847,r:'orange',sc:'13/25',
+ i:'Norte del Cauca adyacente a zona de conflicto. Rutas comerciales perturbadas por paros armados. Área de refuerzo militar post-ofensiva de abril.',
+ a:'FARC-EMC'},
+{n:'Buenaventura',d:'Valle del Cauca',lat:3.8831,lng:-77.0311,r:'orange',sc:'14/25',
+ i:'Principal puerto del Pacífico bajo influencia de grupos armados. FARC-EMC compite con redes criminales por rutas de exportación de drogas. Asesinatos selectivos de líderes comunitarios.',
+ a:'FARC-EMC / AGC / Redes criminales'},
+{n:'Cali',d:'Valle del Cauca',lat:3.4516,lng:-76.5320,r:'yellow',sc:'14/25',
+ i:'Base militar atacada el 24 abr 2026. Primer enjambre de drones en Colombia (15 drones explosivos, 11 abr). Atentados: 1 muerto y 9 heridos en zona urbana. 26 ataques coordinados. Excluida de la restricción de extranjeros del US State Dept (ciudad capital). Todo el personal requiere protocolos reforzados.',
+ a:'FARC-EMC (Frente Jaime Martínez)'},
+{n:'Dagua',d:'Valle del Cauca',lat:3.6594,lng:-76.6944,r:'orange',sc:'12/25',
+ i:'Sobre la vía Cali–Buenaventura (Ruta 40), corredor clave del narcotráfico. Actividad y control de grupos armados. Alto riesgo para convoyes de suministros.',
+ a:'FARC-EMC / Redes criminales'},
+{n:'Pradera',d:'Valle del Cauca',lat:3.4239,lng:-76.2406,r:'orange',sc:'11/25',
+ i:'Sur del Valle del Cauca cerca de zona de conflicto. Presencia de grupos armados en área rural. Monitoreo intensificado tras ofensiva de abril.',
+ a:'FARC-EMC'},
+{n:'Saravena',d:'Arauca',lat:7.0119,lng:-71.8719,r:'orange',sc:'14/25',
+ i:'Ataque del ELN el 20 abr 2026 causó la muerte de Paola Infante Jaimes, líder sindical y docente del Centro Rural Atanasio Girardot. Alerta temprana de la Defensoría emitida. Grave riesgo para comunidades indígenas.',
+ a:'ELN'},
+{n:'Tame',d:'Arauca',lat:6.4656,lng:-71.7319,r:'orange',sc:'13/25',
+ i:'Gobernador indígena Wilfredo Campos (reserva Macarieros) secuestrado feb 2026; cuerpo hallado en vía Tame–Fortul. Zona de riesgo extremo según Defensoría. ELN activo.',
+ a:'ELN'},
+{n:'Roberto Payán',d:'Nariño',lat:1.8539,lng:-77.9472,r:'orange',sc:'13/25',
+ i:'Influencia territorial FARC-EMC. Zona cocalera. Paros armados impuestos. Confinamiento comunitario. Vía de acceso desde Barbacoas bajo control armado.',
+ a:'FARC-EMC'},
+{n:'Magüí Payán',d:'Nariño',lat:1.8397,lng:-77.5883,r:'orange',sc:'13/25',
+ i:'Presencia FARC-EMC. Comunidad ribereña aislada, acceso estatal limitado. Corredor del narcotráfico. Desplazamiento forzado desde zonas rurales.',
+ a:'FARC-EMC'},
+{n:'Ricaurte',d:'Nariño',lat:1.2119,lng:-77.9844,r:'orange',sc:'12/25',
+ i:'Actividad de grupos armados en corredor fronterizo con Ecuador. Ruta del narcotráfico. Tensiones escaladas tras ataque aéreo de mar 2026 (27 muertos).',
+ a:'FARC-EMC / Los Lobos (Ecuador)'},
+{n:'Cumbal',d:'Nariño',lat:0.9139,lng:-77.7892,r:'orange',sc:'11/25',
+ i:'Cerca de la frontera Colombia–Ecuador. Actividad de grupos armados. Disidencias FARC usan el corredor fronterizo para operaciones transfronterizas.',
+ a:'FARC-EMC / Grupos transfronterizos'},
+{n:'Ipiales',d:'Nariño',lat:0.8294,lng:-77.6441,r:'orange',sc:'11/25',
+ i:'Ciudad fronteriza con Ecuador. Narcotráfico activo. Altas tensiones tras ataque aéreo del 17 mar (27 muertos). Grupos armados explotan la brecha fronteriza.',
+ a:'FARC-EMC / Redes criminales'},
+{n:'La Tola',d:'Nariño',lat:2.9822,lng:-78.2258,r:'orange',sc:'12/25',
+ i:'Control de grupos armados en costa Pacífica. Confinamiento forzado. Acceso restringido. Parte del corredor Pacífico de Nariño bajo influencia FARC-EMC.',
+ a:'FARC-EMC / FARC Segunda Marquetalia'},
+{n:'Leiva',d:'Nariño',lat:1.5781,lng:-77.3494,r:'orange',sc:'12/25',
+ i:'FARC-EMC activo. Territorio cocalero. Acceso vial bloqueado por paros armados en ventana de 30 días.',
+ a:'FARC-EMC'},
+{n:'Iscuandé',d:'Nariño',lat:2.4444,lng:-77.9786,r:'orange',sc:'12/25',
+ i:'Bastión de grupos armados en la costa Pacífica. Confinamiento comunitario activo. VBG y reclutamiento de menores documentados.',
+ a:'FARC-EMC'},
+{n:'Quibdó',d:'Chocó',lat:5.6947,lng:-76.6544,r:'orange',sc:'12/25',
+ i:'Conflicto ELN–Clan del Golfo por minas de oro ilegales y rutas de narcotráfico/migrantes. Homicidios selectivos. Confinamiento forzado de comunidades.',
+ a:'ELN / Clan del Golfo (AGC)'},
+{n:'Turbo',d:'Antioquia',lat:8.1022,lng:-76.7314,r:'orange',sc:'12/25',
+ i:'Bastión del Clan del Golfo en el Caribe. Hub del narcotráfico. Paros armados periódicos. Líderes sociales amenazados. Control de rutas de Urabá.',
+ a:'Clan del Golfo (AGC)'},
+{n:'Apartadó',d:'Antioquia',lat:7.8864,lng:-76.6328,r:'orange',sc:'12/25',
+ i:'Región de Urabá — competencia Clan del Golfo / ELN. Violencia continua contra líderes comunitarios. Reclutamiento forzado activo.',
+ a:'Clan del Golfo (AGC) / ELN'},
+{n:'Puerto Asís',d:'Putumayo',lat:0.5050,lng:-76.5097,r:'orange',sc:'12/25',
+ i:'Bastión de disidencias FARC en Putumayo. Narcotráfico. Conflicto territorial renovado entre EMC y Segunda Marquetalia. Rutas hacia Ecuador bajo disputa.',
+ a:'FARC-EMC / FARC Segunda Marquetalia'},
+{n:'Mocoa',d:'Putumayo',lat:1.1519,lng:-76.6497,r:'orange',sc:'11/25',
+ i:'Capital departamental. Rutas del narcotráfico convergen. Conflicto renovado en la provincia. Grupos armados aumentan presión sobre comunidades y vías.',
+ a:'FARC-EMC / Redes criminales'},
+{n:'Puerto Caicedo',d:'Putumayo',lat:0.6711,lng:-76.5947,r:'orange',sc:'12/25',
+ i:'Disidencias FARC activas. Zona productora de coca. Competencia territorial. Acceso vial periódicamente restringido por paros armados.',
+ a:'FARC-EMC / FARC Segunda Marquetalia'},
+{n:'Arauca (ciudad)',d:'Arauca',lat:7.0842,lng:-70.7553,r:'orange',sc:'11/25',
+ i:'Capital departamental cerca de zona activa del ELN. Frontera venezolana. Feb 2026: convoya de senador emboscada en Arauca (2 muertos). ELN con presencia activa.',
+ a:'ELN'},
+{n:'Uribia',d:'La Guajira',lat:11.7131,lng:-72.3267,r:'yellow',sc:'6/25',
+ i:'Operación militar-policial el 10 abr 2026 mató 9 supuestos escoltas de "Naín" (Autodefensas Conquistadoras). Ataques retaliatorios posteriores. La Guajira no figura en los departamentos restringidos del US State Dept — restricción de extranjeros CoH no aplica. Protocolo AMARILLO para todo el personal.',
+ a:'Autodefensas Conquistadoras de la Sierra Nevada'},
+{n:'Montería',d:'Córdoba',lat:8.7575,lng:-75.8933,r:'yellow',sc:'5/25',
+ i:'Departamento bastión del Clan del Golfo. Extorsión criminal al comercio y transporte. Incidentes armados esporádicos en zona rural. Córdoba no figura en los departamentos restringidos del US State Dept — restricción de extranjeros CoH no aplica. Protocolo AMARILLO para todo el personal.',
+ a:'Clan del Golfo (AGC)'},
+
+// ══ AMARILLO ══
+{n:'Pasto',d:'Nariño',lat:1.2136,lng:-77.2811,r:'yellow',sc:'8/25',
+ i:'Capital regional. Proximidad a municipios NARANJA/ROJO. Actividad periódica de grupos armados en rutas de acceso. Preocupaciones por violencia electoral (31 may).',
+ a:'FARC-EMC (rutas de acceso)'},
+{n:'Palmira',d:'Valle del Cauca',lat:3.5394,lng:-76.2983,r:'yellow',sc:'7/25',
+ i:'Cerca del corredor Cali–Popayán. Riesgo de desbordamiento desde incidentes de Cali. Actividad de grupos armados en periferia rural.',
+ a:'FARC-EMC (periférico)'},
+{n:'Buga',d:'Valle del Cauca',lat:3.9011,lng:-76.2964,r:'yellow',sc:'6/25',
+ i:'Valle Central. Cerca de zonas activas. Presencia esporádica de grupos armados. 1–2 incidentes en 30 días.',
+ a:'Redes criminales / Clan del Golfo'},
+{n:'Cartago',d:'Valle del Cauca',lat:4.7467,lng:-75.9122,r:'yellow',sc:'7/25',
+ i:'Corredor del narcotráfico entre el Cauca y la región cafetera. Extorsión al transporte comercial. Bloqueos periódicos.',
+ a:'Redes criminales'},
+{n:'Tuluá',d:'Valle del Cauca',lat:4.0867,lng:-76.1972,r:'yellow',sc:'6/25',
+ i:'Centro del Valle del Cauca. Actividad criminal en áreas periurbanas. Monitoreo intensificado.',
+ a:'Redes criminales / Clan del Golfo'},
+{n:'Yumbo',d:'Valle del Cauca',lat:3.5836,lng:-76.4942,r:'yellow',sc:'6/25',
+ i:'Adyacente a Cali, zona industrial. Cerca de atentado de abril. Monitoreo intensificado durante período electoral.',
+ a:'FARC-EMC (proximidad)'},
+{n:'Manizales',d:'Caldas',lat:5.0689,lng:-75.5174,r:'yellow',sc:'5/25',
+ i:'Cerca de departamentos afectados por el conflicto. Actividad esporádica de grupos armados en vías rurales de acceso.',
+ a:'Redes criminales (periférico)'},
+{n:'Pereira',d:'Risaralda',lat:4.8133,lng:-75.6961,r:'yellow',sc:'5/25',
+ i:'Centro de la región cafetera. Cierta proximidad a corredores de grupos armados. Extorsión criminal periódica.',
+ a:'Redes criminales'},
+{n:'Medellín',d:'Antioquia',lat:6.2442,lng:-75.5812,r:'yellow',sc:'7/25',
+ i:'9 abr 2026: gobierno suspendió diálogos de paz en Medellín. Actividad de grupos armados urbanos en comunas periféricas. Preocupaciones de seguridad electoral.',
+ a:'Grupos criminales urbanos / Clan del Golfo'},
+{n:'Mutatá',d:'Antioquia',lat:7.2494,lng:-76.4378,r:'yellow',sc:'7/25',
+ i:'Zona bananera de Urabá. Competencia Clan del Golfo–ELN. Incidentes periódicos en vías de acceso. Líderes sociales en riesgo.',
+ a:'Clan del Golfo (AGC) / ELN'},
+{n:'Neiva',d:'Huila',lat:2.9273,lng:-75.2819,r:'yellow',sc:'6/25',
+ i:'Cerca del territorio de disidencias FARC en Caquetá. Incidentes esporádicos. Rutas del narcotráfico.',
+ a:'Disidencias FARC'},
+{n:'Cúcuta',d:'Norte de Santander',lat:7.8939,lng:-72.5078,r:'yellow',sc:'8/25',
+ i:'Gran ciudad fronteriza cerca de la crisis del Catatumbo. Desbordamiento del conflicto ELN-FARC en Tibú/San Calixto. Preocupaciones de seguridad electoral. Actividad criminal en periferia urbana.',
+ a:'ELN / FARC-EMBF (cercano)'},
+{n:'Ocaña',d:'Norte de Santander',lat:8.2342,lng:-73.3556,r:'yellow',sc:'7/25',
+ i:'Cerca de la zona del Catatumbo. Actividad de ELN y disidencias FARC en zonas rurales. 1–2 incidentes en 30 días.',
+ a:'ELN / FARC-EMBF'},
+{n:'Villavicencio',d:'Meta',lat:4.1420,lng:-73.6267,r:'yellow',sc:'6/25',
+ i:'Cerca de zonas de conflicto en Meta/Caquetá. Presencia de disidencias FARC en el departamento. Incidentes armados esporádicos.',
+ a:'FARC-EMC / FARC Segunda Marquetalia'},
+{n:'Puerto Leguízamo',d:'Putumayo',lat:-0.1889,lng:-74.7747,r:'yellow',sc:'7/25',
+ i:'23 mar 2026: accidente aéreo C-130 de la FAC causó 66 muertos. Disidencias FARC en selva circundante. Frontera con Perú.',
+ a:'FARC-EMC'},
+{n:'Florencia',d:'Caquetá',lat:1.6167,lng:-75.6167,r:'yellow',sc:'6/25',
+ i:'Capital del Caquetá. Territorio histórico FARC, ahora con competencia de disidencias. Conflicto renovado. 1–2 incidentes en 30 días.',
+ a:'FARC-EMC / FARC Segunda Marquetalia'},
+{n:'San Vicente del Caguán',d:'Caquetá',lat:2.1136,lng:-74.7694,r:'yellow',sc:'7/25',
+ i:'Corazón histórico FARC (antigua zona de despeje). Competencia entre facciones EMC y EMBF. Zona productora de drogas.',
+ a:'FARC-EMC / FARC-EMBF'},
+{n:'Valledupar',d:'Cesar',lat:10.4772,lng:-73.2503,r:'yellow',sc:'5/25',
+ i:'Actividad del Clan del Golfo en Cesar rural. Extorsión criminal esporádica. Ciudad relativamente estable.',
+ a:'Clan del Golfo (AGC)'},
+{n:'Riohacha',d:'La Guajira',lat:11.5381,lng:-72.9067,r:'yellow',sc:'6/25',
+ i:'La Guajira catalogada como uno de los tres departamentos "capturados por crimen organizado" (abr 2026). Riesgo retaliatorio tras operación del 10 abr en Uribia.',
+ a:'Autodefensas Conquistadoras de la Sierra Nevada'},
+{n:'Llorente',d:'Nariño',lat:1.6183,lng:-78.4617,r:'yellow',sc:'8/25',
+ i:'Cerca de Tumaco (zona ROJA). Actividad FARC-EMC en zona rural. Sub-corredor del narcotráfico. 1–2 incidentes en 30 días.',
+ a:'FARC-EMC'},
+{n:'Puerres',d:'Nariño',lat:0.9333,lng:-77.5000,r:'yellow',sc:'7/25',
+ i:'Zona fronteriza con Ecuador. Actividad de grupos armados en corredor fronterizo. Narcotráfico. Monitoreo requerido antes de viajar.',
+ a:'FARC-EMC / Redes criminales'},
+{n:'Bucaramanga',d:'Santander',lat:7.1254,lng:-73.1198,r:'yellow',sc:'4/25',
+ i:'Ciudad nororiental importante. Bajo riesgo directo, pero monitorear desbordamiento de Norte de Santander. Actividad criminal en la periferia.',
+ a:'Redes criminales (periférico)'},
+{n:'Bahía Solano',d:'Chocó',lat:6.2264,lng:-77.3983,r:'yellow',sc:'6/25',
+ i:'Zona costera del Chocó. Presencia de ELN/Clan del Golfo en territorio circundante. Incidentes esporádicos.',
+ a:'ELN / Clan del Golfo'},
+
+// ══ VERDE ══
+{n:'Bogotá',d:'Cundinamarca (D.C.)',lat:4.7110,lng:-74.0721,r:'green',sc:'3/25',
+ i:'Capital nacional. Abr 2026: complot de asesinato contra candidato Cepeda; Petro sobrevivió supuesto intento contra helicóptero. Seguridad electoral elevada. Generalmente permisiva.',
+ a:'Riesgo de violencia política (período pre-electoral)'},
+{n:'Barranquilla',d:'Atlántico',lat:10.9685,lng:-74.7813,r:'green',sc:'2/25',
+ i:'Gran puerto del Caribe. Sin indicadores de conflicto activo en ventana de 30 días. Operaciones estándar.',
+ a:'N/A — monitoreo rutinario'},
+{n:'Cartagena',d:'Bolívar',lat:10.3910,lng:-75.4794,r:'green',sc:'2/25',
+ i:'Ciudad turística y portuaria. Sin indicadores de conflicto activo. Operaciones estándar.',
+ a:'N/A — monitoreo rutinario'},
+{n:'Santa Marta',d:'Magdalena',lat:11.2408,lng:-74.2110,r:'green',sc:'2/25',
+ i:'Costa Caribe. Sin conflicto activo en zona inmediata. Operaciones estándar.',
+ a:'N/A — monitoreo rutinario'},
+{n:'Ibagué',d:'Tolima',lat:4.4389,lng:-75.2322,r:'green',sc:'2/25',
+ i:'Centro urbano estable. Sin indicadores de conflicto activo en ventana de 30 días.',
+ a:'N/A — monitoreo rutinario'},
+{n:'Armenia',d:'Quindío',lat:4.5339,lng:-75.6811,r:'green',sc:'2/25',
+ i:'Región cafetera. Sin conflicto activo en ventana de 30 días. Operaciones estándar.',
+ a:'N/A — monitoreo rutinario'},
+{n:'Santa Rosa de Cabal',d:'Risaralda',lat:4.8694,lng:-75.6214,r:'green',sc:'2/25',
+ i:'Municipio estable en la región cafetera. Sin conflicto activo.',
+ a:'N/A — monitoreo rutinario'}
+];
+
+// ═══════════════════════════════════════════════════════════════════
+// SEGMENTOS VIALES DE RIESGO
+// Cada segmento = ±25 km desde la zona de riesgo, siguiendo la vía real.
+// OSRM convierte los puntos from/to en geometría exacta de carretera.
+// Coordenadas: [lat, lng] — sobre la vía real identificada en OSM.
+// ═══════════════════════════════════════════════════════════════════
+const SEGMENTS = [
+  // ── ROJO ──
+  {
+    name:'Panamericana — Zona del atentado Cajibío (25 Abr 2026)',
+    r:'red',
+    // De un punto en la vía ~25 km al norte de Cajibío a ~25 km al sur
+    from:[2.8100,-76.5200],  // sobre Panamericana norte del atentado (zona Santander de Q)
+    to:  [2.2900,-76.7100]   // sobre Panamericana sur del atentado (zona Timbío/Rosas)
+  },
+  {
+    name:'Panamericana — Zona El Bordo / Patía (carro bomba)',
+    r:'red',
+    from:[2.2900,-76.7100],  // norte del Bordo (~25 km)
+    to:  [1.8400,-77.1600]   // sur del Bordo (~25 km, hacia Mercaderes)
+  },
+  {
+    name:'Vía Popayán–Buenaventura — Zona El Tambo (Ruta 80)',
+    r:'red',
+    from:[2.5100,-76.6500],  // en la vía al oeste de Popayán (~25 km este del riesgo)
+    to:  [2.1800,-77.1100]   // en la vía hacia la costa (~25 km oeste del riesgo)
+  },
+  {
+    name:'Vía Tumaco–Pasto — Zona Barbacoas',
+    r:'red',
+    from:[1.9400,-78.0000],  // en la vía ~25 km NE de Barbacoas
+    to:  [1.4500,-78.3900]   // en la vía ~25 km SW de Barbacoas
+  },
+  {
+    name:'Vía Cúcuta–Tibú — Corredor del Catatumbo (Ruta 55)',
+    r:'red',
+    from:[8.0500,-72.5400],  // en la Ruta 55, ~25 km al sur de Tibú
+    to:  [8.6600,-72.7300]   // Tibú (extremo norte del segmento)
+  },
+
+  // ── NARANJA ──
+  {
+    name:'Panamericana — Norte del Cauca (Santander de Quilichao)',
+    r:'orange',
+    from:[3.2300,-76.4400],  // en la vía ~25 km al norte (límite Valle-Cauca)
+    to:  [2.8300,-76.5200]   // en la vía ~25 km al sur (entre SdQ y Cajibío)
+  },
+  {
+    name:'Panamericana — Mercaderes hacia Pasto',
+    r:'orange',
+    from:[1.7200,-77.1800],  // en la vía ~25 km norte (zona Mercaderes)
+    to:  [1.2800,-77.2700]   // en la vía ~25 km sur (zona sur de La Unión/Nariño)
+  },
+  {
+    name:'Vía Cali–Buenaventura (Ruta 40) — Zona Dagua',
+    r:'orange',
+    from:[3.5200,-76.4500],  // en Ruta 40 ~25 km al este de Dagua (hacia Cali)
+    to:  [3.7500,-76.9300]   // en Ruta 40 ~25 km al oeste de Dagua (hacia Buenaventura)
+  },
+  {
+    name:'Vía Arauca–Tame — Zona de conflicto ELN',
+    r:'orange',
+    from:[6.9500,-71.0400],  // en la vía ~25 km al este (hacia Arauca)
+    to:  [6.5900,-71.6300]   // en la vía ~25 km al oeste (hacia Tame)
+  },
+  {
+    name:'Vía Puerto Asís–Mocoa — Zona de conflicto Putumayo',
+    r:'orange',
+    from:[0.8800,-76.5600],  // en la vía ~25 km al norte de Puerto Caicedo (hacia Mocoa)
+    to:  [0.4500,-76.6300]   // en la vía ~25 km al sur de Puerto Caicedo (hacia Puerto Asís)
+  },
+  {
+    name:'Panamericana — Ipiales / Zona fronteriza Ecuador',
+    r:'orange',
+    from:[0.9600,-77.5900],  // en la vía ~25 km al norte (hacia Ipiales desde Pasto)
+    to:  [0.6200,-77.7100]   // en la vía ~25 km al sur (hacia la frontera con Ecuador)
+  },
+
+  // ── AMARILLO ──
+  {
+    name:'Panamericana — Pasto a Ipiales',
+    r:'yellow',
+    from:[1.2400,-77.3100],  // en la vía al sur de Pasto
+    to:  [0.9600,-77.5900]   // en la vía al norte de Ipiales
+  },
+  {
+    name:'Ruta 25/40 — Tuluá / Centro Valle del Cauca',
+    r:'yellow',
+    from:[4.3100,-76.1600],  // en la vía ~25 km al norte de Tuluá (hacia Cartago)
+    to:  [3.8800,-76.2500]   // en la vía ~25 km al sur de Tuluá (hacia Buga/Cali)
+  },
+  {
+    name:'Vía Medellín–Turbo (Ruta 62) — Zona Mutatá/Urabá',
+    r:'yellow',
+    from:[7.1800,-76.1800],  // en la vía ~25 km al este de Mutatá (hacia Medellín)
+    to:  [7.3200,-76.7000]   // en la vía ~25 km al oeste de Mutatá (hacia Turbo)
+  },
+  {
+    name:'Vía Quibdó–Medellín (Ruta 60) — Corredor Chocó',
+    r:'yellow',
+    from:[6.0600,-75.9800],  // en la vía ~25 km al este de Quibdó (hacia Medellín)
+    to:  [5.8900,-76.5800]   // en la vía ~25 km al oeste (hacia Quibdó)
+  }
+];
+
+// ═══════════════════════════════════════════════════════════════════
+// MAPA — LEAFLET + ESRI SATELLITE
+// ═══════════════════════════════════════════════════════════════════
+const map = L.map('map',{center:[4.5,-74.0],zoom:6,zoomControl:false,attributionControl:true});
+L.control.zoom({position:'bottomleft'}).addTo(map);
+
+const TILES = {
+  sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    {maxZoom:18,attribution:'Tiles &copy; Esri &mdash; Esri, Maxar, GeoEye, Earthstar Geographics'}),
+  hyb: L.layerGroup([
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:18}),
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+      {maxZoom:18,opacity:0.85,attribution:'Labels &copy; Esri'})
+  ]),
+  ter: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+    {maxZoom:18,attribution:'Tiles &copy; Esri'}),
+  str: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    {maxZoom:19,attribution:'&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>'})
+};
+TILES.hyb.addTo(map);
+
+function setTile(name,btn){
+  Object.values(TILES).forEach(t=>{if(map.hasLayer(t))map.removeLayer(t);});
+  TILES[name].addTo(map);
+  document.querySelectorAll('.ctrl .cb[id^="b-"]').forEach(b=>b.classList.remove('ac'));
+  btn.classList.add('ac');
+}
+
+// ── MUNICIPIOS ─────────────────────────────────────────────────────
+const allCircles=[];
+const RADIUS_M=10000; // 10 km fijos
+
+MUNIS.forEach(m=>{
+  const st=CSTYLE[m.r];
+  const glow=L.circle([m.lat,m.lng],{
+    radius:RADIUS_M*1.4,fillColor:st.fillColor,fillOpacity:0.05,color:'transparent',weight:0
+  }).addTo(map);
+  const circle=L.circle([m.lat,m.lng],{
+    radius:RADIUS_M,fillColor:st.fillColor,fillOpacity:st.fillOpacity,
+    color:st.color,weight:st.weight,opacity:st.opacity
+  }).addTo(map);
+  const html=`<div class="ph"><span class="rp ${PILL[m.r]}">${NZ[m.r]}</span>
+    <div><div class="pm">${m.n}</div><div class="pd">${m.d} &nbsp;·&nbsp; Puntuación: ${m.sc}</div></div></div>
+    <div class="pb">${m.i}</div>
+    <div class="pa">▸ Actores activos: ${m.a}</div>
+    <div class="pp">${POSTURA[m.r]}</div>`;
+  circle.bindPopup(html,{maxWidth:330});
+  glow.bindPopup(html,{maxWidth:330});
+  allCircles.push({circle,glow,risk:m.r});
+});
+
+// ── VÍAS — OSRM ROUTING ────────────────────────────────────────────
+// Usa OSRM (enrutamiento de código abierto) para obtener geometría
+// exacta de carretera. Si falla, traza línea recta de respaldo.
+const allPolylines=[];
+const OSRM='https://router.project-osrm.org/route/v1/driving';
+const TIMEOUT_MS=8000;
+
+async function fetchRoute(from,to){
+  // OSRM: coordenadas en formato lng,lat
+  const url=`${OSRM}/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson`;
+  const ctrl=new AbortController();
+  const tid=setTimeout(()=>ctrl.abort(),TIMEOUT_MS);
+  try{
+    const r=await fetch(url,{signal:ctrl.signal});
+    clearTimeout(tid);
+    const d=await r.json();
+    if(d.code!=='Ok'||!d.routes[0])return null;
+    // Convertir [lng,lat] → [lat,lng] para Leaflet
+    return d.routes[0].geometry.coordinates.map(([lng,lat])=>[lat,lng]);
+  }catch(e){
+    clearTimeout(tid);
+    return null;
+  }
+}
+
+function drawSegment(seg,latlngs){
+  const col=RC[seg.r];
+  const wt=seg.r==='red'?5.5:seg.r==='orange'?4:3;
+  const glow=L.polyline(latlngs,{
+    color:col,weight:wt+14,opacity:0.10,lineCap:'round',lineJoin:'round'
+  }).addTo(map);
+  const line=L.polyline(latlngs,{
+    color:col,weight:wt,
+    opacity:seg.r==='red'?0.95:seg.r==='orange'?0.85:0.65,
+    dashArray:seg.r==='yellow'?'8 6':null,
+    lineCap:'round',lineJoin:'round'
+  }).addTo(map);
+  const html=`<div class="ph"><span class="rp ${PILL[seg.r]}">${NZ[seg.r]}</span>
+    <div><div class="pm" style="font-size:12px">${seg.name}</div>
+    <div class="pd">Tramo de riesgo · ±25 km desde zona de riesgo</div></div></div>
+    <div class="pp">${POSTURA[seg.r]}</div>`;
+  line.bindPopup(html,{maxWidth:320});
+  glow.bindPopup(html,{maxWidth:320});
+  allPolylines.push({line,glow,risk:seg.r});
+}
+
+async function loadAllRoads(){
+  const statusEl=document.getElementById('road-status');
+  const msgEl=document.getElementById('road-msg');
+  let done=0;
+  msgEl.textContent=`Cargando vías exactas… 0/${SEGMENTS.length}`;
+
+  const tasks=SEGMENTS.map(async seg=>{
+    const latlngs=await fetchRoute(seg.from,seg.to);
+    done++;
+    msgEl.textContent=`Cargando vías exactas… ${done}/${SEGMENTS.length}`;
+    if(latlngs&&latlngs.length>1){
+      drawSegment(seg,latlngs);
+    }else{
+      // Respaldo: línea recta entre los dos puntos si OSRM falla
+      drawSegment(seg,[seg.from,seg.to]);
+    }
+  });
+
+  await Promise.all(tasks);
+
+  // Ocultar indicador de carga
+  statusEl.innerHTML=`<span style="color:var(--green-s)">✓</span>&nbsp;Vías cargadas exactamente`;
+  setTimeout(()=>statusEl.style.opacity='0',2000);
+  setTimeout(()=>statusEl.style.display='none',2500);
+}
+
+// Cargar límites departamentales
+fetch('https://gist.githubusercontent.com/john-guerra/43c7656821069d00dcbc/raw/3aadedf47badbdac311d9dff8d9a6000ca1e18eb/colombia.geo.json')
+  .then(r=>r.json())
+  .then(data=>{
+    L.geoJSON(data,{
+      style:{color:'rgba(255,255,255,0.50)',weight:1.1,fillOpacity:0},
+      onEachFeature(feat,layer){
+        const nm=feat.properties?.NOMBRE_DPT||'';
+        if(nm)layer.bindTooltip(nm.charAt(0)+nm.slice(1).toLowerCase(),
+          {permanent:false,direction:'center',className:'dept-tip'});
+      }
+    }).addTo(map);
+  }).catch(()=>{});
+
+// Iniciar carga de rutas viales
+loadAllRoads();
+
+// ── FILTRO ─────────────────────────────────────────────────────────
+function fz(zone,btn){
+  document.querySelectorAll('.ctrl .cb[onclick^="fz"]').forEach(b=>{b.className='cb';});
+  if(btn){const cls={all:'ac',red:'ar',orange:'ao',yellow:'ay',green:'ag',white:'aw'}[zone];btn.classList.add(cls);}
+  allCircles.forEach(({circle,glow,risk})=>{
+    const show=zone==='all'||risk===zone;
+    if(show){if(!map.hasLayer(circle)){map.addLayer(circle);map.addLayer(glow);}}
+    else{map.removeLayer(circle);map.removeLayer(glow);}
+  });
+  allPolylines.forEach(({line,glow,risk})=>{
+    const show=zone==='all'||risk===zone;
+    if(show){if(!map.hasLayer(line)){map.addLayer(line);map.addLayer(glow);}}
+    else{map.removeLayer(line);map.removeLayer(glow);}
+  });
+}
+
+// ── MOBILE SLIDE-UP SHEETS ────────────────────────────
+function openMobSheet(id) {
+  const overlay = document.getElementById('mob-overlay');
+  const current = document.querySelector('.mob-sheet.open');
+  // Toggle off if same sheet
+  if (current && current.id === 'sheet-' + id) {
+    closeMobSheets();
+    return;
+  }
+  // Open requested sheet
+  document.querySelectorAll('.mob-sheet').forEach(s => s.classList.remove('open'));
+  document.querySelectorAll('.mob-tab').forEach(t => t.classList.remove('active'));
+  const sheet = document.getElementById('sheet-' + id);
+  const tab   = document.getElementById('tab-' + id);
+  if (sheet) sheet.classList.add('open');
+  if (tab)   tab.classList.add('active');
+  if (overlay) overlay.classList.add('open');
+}
+function closeMobSheets() {
+  document.querySelectorAll('.mob-sheet').forEach(s => s.classList.remove('open'));
+  document.querySelectorAll('.mob-tab').forEach(t => t.classList.remove('active'));
+  const overlay = document.getElementById('mob-overlay');
+  if (overlay) overlay.classList.remove('open');
+}
+// Keep desktop tile buttons and mobile tile buttons in sync
+function setMobTileBtn(btn) {
+  document.querySelectorAll('#sheet-layers .cb').forEach(b => b.classList.remove('ac'));
+  btn.classList.add('ac');
+}
+// Keep filter sync between desktop and mobile sheets
+function syncMobFilter(btn) {
+  document.querySelectorAll('#sheet-filter .cb').forEach(b => {b.className='cb';});
+  const zone = btn.getAttribute('onclick').match(/fz\('(\w+)'/);
+  if (zone) {
+    const cls = {all:'ac',red:'ar',orange:'ao',yellow:'ay',green:'ag',white:'aw'}[zone[1]];
+    btn.classList.add(cls);
+  }
+}
+// Populate mobile stats strip from live MUNIS data
+function updateMobStats() {
+  const counts = {red:0, orange:0, yellow:0, green:0, white:0};
+  MUNIS.forEach(m => { if (counts[m.r] !== undefined) counts[m.r]++; });
+  // Mobile stats strip
+  const mr = document.getElementById('m-r');
+  const mo = document.getElementById('m-o');
+  const my = document.getElementById('m-y');
+  const mg = document.getElementById('m-g');
+  if (mr) mr.textContent = counts.red;
+  if (mo) mo.textContent = counts.orange;
+  if (my) my.textContent = counts.yellow;
+  if (mg) mg.textContent = counts.green;
+  // Desktop stats bar (same live data)
+  const dr = document.getElementById('d-r');
+  const do_ = document.getElementById('d-o');
+  const dy = document.getElementById('d-y');
+  const dg = document.getElementById('d-g');
+  if (dr)  dr.textContent  = counts.red;
+  if (do_) do_.textContent = counts.orange;
+  if (dy)  dy.textContent  = counts.yellow;
+  if (dg)  dg.textContent  = counts.green;
+  const dw_ = document.getElementById('d-w');
+  const mw  = document.getElementById('m-w');
+  if (dw_) dw_.textContent = counts.white;
+  if (mw)  mw.textContent  = counts.white;
+}
+updateMobStats();
+</script>
+</body>
+</html>
