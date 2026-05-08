@@ -64,6 +64,18 @@ def parse_event_date(date_str):
     except Exception:
         return date.today()
 
+def normalize_name(name):
+    """Normalize municipality names to prevent accent-based duplicates.
+    'Cajibío' and 'Cajibio' should match the same entry."""
+    replacements = {
+        'á':'a','é':'e','í':'i','ó':'o','ú':'u','ü':'u','ñ':'n',
+        'Á':'A','É':'E','Í':'I','Ó':'O','Ú':'U','Ü':'U','Ñ':'N'
+    }
+    result = name
+    for accented, plain in replacements.items():
+        result = result.replace(accented, plain)
+    return result.strip()
+
 def event_is_active(event, today):
     d = parse_event_date(event.get('date',''))
     return (today - d).days <= EVENT_WINDOW_DAYS
@@ -200,9 +212,6 @@ GREEN_BASELINE = [
     {"n":"Yopal",                "d":"Casanare",            "lat":5.3378, "lng":-72.3959},
     {"n":"Villavicencio",        "d":"Meta",                "lat":4.1420, "lng":-73.6267},
     {"n":"Neiva",                "d":"Huila",               "lat":2.9273, "lng":-75.2819},
-    {"n":"Popayan",              "d":"Cauca",               "lat":2.4419, "lng":-76.6072},
-    {"n":"Pasto",                "d":"Narino",              "lat":1.2136, "lng":-77.2811},
-    {"n":"Cali",                 "d":"Valle del Cauca",     "lat":3.4516, "lng":-76.5320},
     {"n":"Medellin",             "d":"Antioquia",           "lat":6.2442, "lng":-75.5812},
     {"n":"Ibague",               "d":"Tolima",              "lat":4.4389, "lng":-75.2322},
     {"n":"Valledupar",           "d":"Cesar",               "lat":10.4772,"lng":-73.2503},
@@ -212,7 +221,6 @@ GREEN_BASELINE = [
     {"n":"Mocoa",                "d":"Putumayo",            "lat":1.1519, "lng":-76.6497},
     {"n":"San Jose del Guaviare","d":"Guaviare",            "lat":2.5683, "lng":-72.6408},
     {"n":"Arauca",               "d":"Arauca",              "lat":7.0842, "lng":-70.7553},
-    {"n":"Palmira",              "d":"Valle del Cauca",     "lat":3.5394, "lng":-76.2983},
 ]
 
 def make_green(m, today):
@@ -557,21 +565,22 @@ def run():
         except Exception as e:
             print(f"No se pudo leer MUNIS: {e}")
 
-    by_name = {m['n']: m for m in existing_munis}
+    by_name = {normalize_name(m['n']): m for m in existing_munis}
     before  = {k: dict(v) for k,v in by_name.items()}
 
     # Seed GREEN baseline (rest of country)
     for g in GREEN_BASELINE:
-        if g['n'] not in by_name:
-            by_name[g['n']] = make_green(g, today)
+        if normalize_name(g['n']) not in by_name:
+            by_name[normalize_name(g['n'])] = make_green(g, today)
 
     # Seed ALL focus department municipalities (Cauca/Valle/Narino)
     for f in FOCUS_MUNICIPALITIES:
-        if f['n'] not in by_name:
-            by_name[f['n']] = make_focus_muni(f, today)
+        nkey = normalize_name(f['n'])
+        if nkey not in by_name:
+            by_name[nkey] = make_focus_muni(f, today)
         else:
             # Mark existing ones as focus dept and update structure info
-            by_name[f['n']]['focus_dept'] = True
+            by_name[nkey]['focus_dept'] = True
             if not by_name[f['n']].get('a') or by_name[f['n']]['a'] == 'N/A - monitoreo rutinario':
                 by_name[f['n']]['a'] = f.get('a','')
     print(f"  Focus depts seeded: {len(FOCUS_MUNICIPALITIES)} municipios (Cauca/Valle del Cauca/Narino)")
@@ -674,13 +683,14 @@ def run():
 
     for ai_m in data['municipios']:
         name      = ai_m.get('n','')
+        nkey      = normalize_name(name)
         ai_events = ai_m.get('events',[])
 
         if ai_m.get('auto_red') and not ai_m.get('auto_red_date'):
             ai_m['auto_red_date'] = ai_events[0].get('date',str(today)) if ai_events else str(today)
 
-        if name in by_name:
-            ex = by_name[name]
+        if nkey in by_name:
+            ex = by_name[nkey]
             ex['events'] = merge_events(ex.get('events',[]), ai_events, today)
             ex['i'] = ai_m.get('i', ex.get('i',''))
             ex['a'] = ai_m.get('a', ex.get('a',''))
@@ -688,10 +698,10 @@ def run():
                 ex['auto_red']      = True
                 ex['auto_red_why']  = ai_m.get('auto_red_why','')
                 ex['auto_red_date'] = ai_m.get('auto_red_date',str(today))
-            by_name[name] = recalculate(ex, today)
+            by_name[nkey] = recalculate(ex, today)
             updated += 1
         else:
-            by_name[name] = recalculate(ai_m, today)
+            by_name[nkey] = recalculate(ai_m, today)
             added += 1
 
     merged = list(by_name.values())
