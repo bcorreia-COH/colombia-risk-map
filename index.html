@@ -227,10 +227,19 @@ MUNIS.forEach(m=>{
     radius:RADIUS_M,fillColor:st.fillColor,fillOpacity:st.fillOpacity,
     color:st.color,weight:st.weight,opacity:st.opacity
   }).addTo(map);
-  const html=`<div class="ph"><span class="rp ${PILL[m.r]}">${NZ[m.r]}</span>
-    <div><div class="pm">${m.n}</div><div class="pd">${m.d} &nbsp;·&nbsp; Puntuación: ${m.sc}</div></div></div>
+ const evCount  = m.ev_count || 0;
+const adjScore = m.adjusted_score || 0;
+const multText = evCount >= 8 ? '×2.5' : evCount >= 5 ? '×2.0' : evCount >= 3 ? '×1.5' : evCount >= 2 ? '×1.25' : '×1.0';
+const autoRed  = m.auto_red  ? `<div class="pa" style="color:#f87171">⚠ ${m.auto_red_why||'Anulación automática ROJO'}</div>` : '';
+const scoreRow = evCount > 0
+  ? `<div class="pa">▸ Eventos (30 días): ${evCount} &nbsp;·&nbsp; Mult: ${multText} &nbsp;·&nbsp; Puntaje: ${adjScore}</div>`
+  : `<div class="pa">▸ Sin eventos de conflicto verificados en los últimos 30 días</div>`;
+const html=`<div class="ph"><span class="rp ${PILL[m.r]}">${NZ[m.r]}</span>
+    <div><div class="pm">${m.n}</div><div class="pd">${m.d}</div></div></div>
     <div class="pb">${m.i}</div>
-    <div class="pa">▸ Actores activos: ${m.a}</div>
+    <div class="pa">▸ Actores armados: ${m.a}</div>
+    ${scoreRow}
+    ${autoRed}
     <div class="pp">${POSTURA[m.r]}</div>`;
   circle.bindPopup(html,{maxWidth:330});
   glow.bindPopup(html,{maxWidth:330});
