@@ -1,4 +1,4 @@
-import os, json, re, sys
+import os, json, re, sys, time
 import urllib.request, urllib.error
 from datetime import datetime, timezone, timedelta, date
 from pathlib import Path
@@ -18,11 +18,11 @@ EMAIL_TO    = os.environ.get("EMAIL_TO", "")
 MAP_URL     = os.environ.get("MAP_URL", "https://bcorreia-coh.github.io/colombia-risk-map/")
 MESES       = {1:'ene',2:'feb',3:'mar',4:'abr',5:'may',6:'jun',
                7:'jul',8:'ago',9:'sep',10:'oct',11:'nov',12:'dic'}
-EVENT_WINDOW_DAYS  = 30   # events older than this expire from score
-WHITE_WINDOW_DAYS  = 60   # focus dept municipalities older than this = WHITE
+EVENT_WINDOW_DAYS = 30
+WHITE_WINDOW_DAYS = 60
 FOCUS_DEPTS = {'cauca','valle del cauca','narino','nariño'}
 
-# Rubrica CoH Seccion 3
+# ── SCORING RUBRIC ────────────────────────────────────────────────────────────
 def get_multiplier(n):
     if n >= 8: return 2.5
     if n >= 5: return 2.0
@@ -53,11 +53,11 @@ EXCLUDED_CITIES = {
     'popayan','popayán','cali','palmira','pasto',
     'medellin','medellín','bello','envigado','itagui','itagüí'
 }
-ZONE_ES    = {'red':'ROJO','orange':'NARANJA','yellow':'AMARILLO','green':'VERDE'}
-ZONE_COLOR = {'red':'#dc2626','orange':'#ea580c','yellow':'#ca8a04','green':'#15803d'}
-ZONE_BG    = {'red':'#fef2f2','orange':'#fff7ed','yellow':'#fefce8','green':'#f0fdf4'}
+ZONE_ES    = {'red':'ROJO','orange':'NARANJA','yellow':'AMARILLO','green':'VERDE','white':'BLANCO'}
+ZONE_COLOR = {'red':'#dc2626','orange':'#ea580c','yellow':'#ca8a04','green':'#15803d','white':'#94a3b8'}
+ZONE_BG    = {'red':'#fef2f2','orange':'#fff7ed','yellow':'#fefce8','green':'#f0fdf4','white':'#f8fafc'}
 
-# Date utilities
+# ── DATE UTILITIES ────────────────────────────────────────────────────────────
 def parse_event_date(date_str):
     try:
         return datetime.strptime(str(date_str).strip(), '%Y-%m-%d').date()
@@ -65,16 +65,16 @@ def parse_event_date(date_str):
         return date.today()
 
 def normalize_name(name):
-    """Strip accents and parenthetical disambiguation so names match AI output."""
+    """Strip accents and parenthetical disambiguation."""
     import re as _re
-    s = _re.sub(r'\s*\([^)]*\)', '', str(name))  # remove (Narino), (Cauca) etc
+    s = _re.sub(r'\s*\([^)]*\)', '', str(name))
     for a, p in [('á','a'),('é','e'),('í','i'),('ó','o'),('ú','u'),('ü','u'),('ñ','n'),
                  ('Á','A'),('É','E'),('Í','I'),('Ó','O'),('Ú','U'),('Ü','U'),('Ñ','N')]:
         s = s.replace(a, p)
-    return s.strip().lower()  # lowercase for reliable matching
+    return s.strip().lower()
 
 def muni_key(name, dept):
-    """Unique key using both name and department to handle same-name municipalities."""
+    """Legacy full key — kept for reference. Use smart_muni_key() instead."""
     return normalize_name(name) + '|' + normalize_name(dept)
 
 def event_is_active(event, today):
@@ -82,10 +82,7 @@ def event_is_active(event, today):
     return (today - d).days <= EVENT_WINDOW_DAYS
 
 def merge_events(existing, new_events, today):
-    existing_keys = set()
-    for e in existing:
-        k = (e.get('date',''), e.get('pts',0), e.get('desc','')[:40])
-        existing_keys.add(k)
+    existing_keys = {(e.get('date',''), e.get('pts',0), e.get('desc','')[:40]) for e in existing}
     merged = [e for e in existing if event_is_active(e, today)]
     for e in new_events:
         k = (e.get('date',''), e.get('pts',0), e.get('desc','')[:40])
@@ -94,22 +91,14 @@ def merge_events(existing, new_events, today):
             existing_keys.add(k)
     return merged
 
-
 def migrate_if_needed(m, today):
-    """
-    Convert municipality from old ev_pts format to new dated events format.
-    Old: ev_pts=[10,5,4], ev_count=3, adjusted_score=21
-    New: events=[{date, pts, desc}, ...]
-    Uses synthetic date of today-14 to keep events active for one more cycle
-    while the AI confirms with proper occurrence dates.
-    """
+    """Convert old ev_pts format to new dated events format."""
     if 'events' in m:
-        return m  # Already in new format
+        return m
     ev_pts = m.get('ev_pts', [])
     if not ev_pts:
         m['events'] = []
         return m
-    # Synthetic date: 14 days ago keeps them active for 16 more days
     syn_date = str(today - timedelta(days=14))
     m['events'] = [
         {"date": syn_date, "pts": p, "desc": "Evento historico (migracion de formato)"}
@@ -161,7 +150,7 @@ def recalculate(m, today):
         m['next_expiry'] = ''
 
     zona = score_to_zone(adj)
-    m['sz'] = score_to_size(adj)
+    m['sz'] = max(10, score_to_size(adj))  # minimum sz=10 so every circle is visible
     m['sc'] = f"Gravedad:{sev}pts x{mult} = {adj} | {ZONE_ES.get(zona,'')}"
 
     if zona == 'orange':
@@ -169,20 +158,15 @@ def recalculate(m, today):
             zona = 'yellow'
             m['sc'] = f"Gravedad:{sev}pts x{mult} = {adj} | AMARILLO (depto. no restringido)"
 
-    # Track last event date (never decreases)
     if active_events:
         latest = max(parse_event_date(e.get('date','')) for e in active_events)
         current_last = parse_event_date(m.get('last_event_date','2000-01-01'))
         if latest > current_last:
             m['last_event_date'] = str(latest)
 
-    # Focus dept white zone: score=0 but check 60-day memory.
-    # Empty last_event_date means no events ever recorded -> WHITE immediately.
-    # parse_event_date('') falls back to today (bug) so we check explicitly first.
     if zona == 'green' and m.get('focus_dept'):
         last_ev_str = m.get('last_event_date', '')
         if not last_ev_str:
-            # No events ever recorded for this municipality -> WHITE
             zona = 'white'
             m['sc'] = "Sin eventos verificados en 60+ dias | BLANCO"
         else:
@@ -194,7 +178,7 @@ def recalculate(m, today):
     m['r'] = zona
     return m
 
-# GREEN baseline
+# ── MUNICIPALITY LISTS ────────────────────────────────────────────────────────
 GREEN_BASELINE = [
     {"n":"Bogota",               "d":"Cundinamarca (D.C.)", "lat":4.7110, "lng":-74.0721},
     {"n":"Barranquilla",         "d":"Atlantico",           "lat":10.9685,"lng":-74.7813},
@@ -236,10 +220,9 @@ def make_green(m, today):
     }
 
 def make_focus_muni(m, today):
-    """Seed a focus-department municipality (Cauca/Valle/Narino) as WHITE."""
     return {
         "n":m["n"],"d":m["d"],"lat":m["lat"],"lng":m["lng"],
-        "r":"white","sz":8,"adjusted_score":0,"ev_count":0,
+        "r":"white","sz":10,"adjusted_score":0,"ev_count":0,
         "events":[],"sc":"Sin eventos verificados en 60+ dias | BLANCO",
         "i":"Sin incidentes verificados en los ultimos 60 dias. Zona de presencia historica de grupos armados.",
         "a":m.get("a","Presencia historica de grupos armados ilegales"),
@@ -247,7 +230,6 @@ def make_focus_muni(m, today):
         "last_event_date":"","focus_dept":True
     }
 
-# All municipalities in the three focus departments with known criminal structures
 FOCUS_MUNICIPALITIES = [
   # ── CAUCA ──────────────────────────────────────────────────────────
   {"n":"Caloto",              "d":"Cauca","lat":3.0236,"lng":-76.4208,"a":"FARC-EMC Frente Dagoberto Ramos"},
@@ -277,11 +259,11 @@ FOCUS_MUNICIPALITIES = [
   {"n":"Rosas",               "d":"Cauca","lat":2.2600,"lng":-76.7200,"a":"FARC-EMC Frente Jaime Martinez / Frente 6"},
   {"n":"Argelia",             "d":"Cauca","lat":1.8800,"lng":-77.2300,"a":"FARC-EMC Frente 6 / Segunda Marquetalia"},
   {"n":"Almaguer",            "d":"Cauca","lat":1.9167,"lng":-76.8333,"a":"FARC-EMC Frente 6"},
-  {"n":"Bolivar",     "d":"Cauca","lat":1.8611,"lng":-76.9611,"a":"FARC-EMC Frente 6"},
+  {"n":"Bolivar",             "d":"Cauca","lat":1.8611,"lng":-76.9611,"a":"FARC-EMC Frente 6"},
   {"n":"San Sebastian",       "d":"Cauca","lat":1.7800,"lng":-76.8100,"a":"FARC-EMC Frente 6"},
-  {"n":"Santa Rosa",  "d":"Cauca","lat":1.6700,"lng":-76.7900,"a":"FARC-EMC Frente 6"},
+  {"n":"Santa Rosa",          "d":"Cauca","lat":1.6700,"lng":-76.7900,"a":"FARC-EMC Frente 6"},
   {"n":"Sotara",              "d":"Cauca","lat":2.1700,"lng":-76.6300,"a":"FARC-EMC Frente Jaime Martinez / Frente 6"},
-  {"n":"Sucre",       "d":"Cauca","lat":1.9600,"lng":-76.9700,"a":"FARC-EMC Frente 6"},
+  {"n":"Sucre",               "d":"Cauca","lat":1.9600,"lng":-76.9700,"a":"FARC-EMC Frente 6"},
   {"n":"La Vega",             "d":"Cauca","lat":1.9700,"lng":-76.7700,"a":"FARC-EMC Frente 6"},
   {"n":"Purace",              "d":"Cauca","lat":2.2600,"lng":-76.4900,"a":"FARC-EMC (influencia)"},
   {"n":"Totoro",              "d":"Cauca","lat":2.5000,"lng":-76.4000,"a":"FARC-EMC Frente Dagoberto Ramos"},
@@ -291,13 +273,13 @@ FOCUS_MUNICIPALITIES = [
   {"n":"Timbiqui",            "d":"Cauca","lat":2.7700,"lng":-77.6800,"a":"FARC-EMC Segunda Marquetalia — costa Pacifica"},
   {"n":"Guapi",               "d":"Cauca","lat":2.5700,"lng":-77.8900,"a":"FARC-EMC Segunda Marquetalia — costa Pacifica"},
   {"n":"Piamonte",            "d":"Cauca","lat":0.8500,"lng":-76.5800,"a":"FARC-EMC Frente 48 — frontera Putumayo"},
-  {"n":"Florencia del Cauca",   "d":"Cauca","lat":1.6067,"lng":-76.6133,"a":"FARC-EMC Frente 6"},
+  {"n":"Florencia del Cauca", "d":"Cauca","lat":1.6067,"lng":-76.6133,"a":"FARC-EMC Frente 6"},
   # ── VALLE DEL CAUCA ───────────────────────────────────────────────
   {"n":"Buenaventura",        "d":"Valle del Cauca","lat":3.8831,"lng":-77.0311,"a":"FARC-EMC / AGC Clan del Golfo / redes criminales — principal puerto del Pacifico"},
   {"n":"Dagua",               "d":"Valle del Cauca","lat":3.6594,"lng":-76.6944,"a":"FARC-EMC Frente Jaime Martinez — corredor Buenaventura"},
   {"n":"Jamundi",             "d":"Valle del Cauca","lat":3.2578,"lng":-76.5369,"a":"FARC-EMC Frente Jaime Martinez"},
   {"n":"Pradera",             "d":"Valle del Cauca","lat":3.4239,"lng":-76.2406,"a":"FARC-EMC Frente Andes / Segunda Marquetalia"},
-  {"n":"Florida",     "d":"Valle del Cauca","lat":3.3272,"lng":-76.2311,"a":"FARC-EMC Frente Andes / Segunda Marquetalia"},
+  {"n":"Florida",             "d":"Valle del Cauca","lat":3.3272,"lng":-76.2311,"a":"FARC-EMC Frente Andes / Segunda Marquetalia"},
   {"n":"Cali",                "d":"Valle del Cauca","lat":3.4516,"lng":-76.5320,"a":"FARC-EMC influencia — ciudad excluida de restriccion extranjeros"},
   {"n":"Palmira",             "d":"Valle del Cauca","lat":3.5394,"lng":-76.2983,"a":"FARC-EMC influencia — ciudad excluida de restriccion extranjeros"},
   {"n":"Yumbo",               "d":"Valle del Cauca","lat":3.5836,"lng":-76.4942,"a":"FARC-EMC / redes criminales"},
@@ -311,7 +293,7 @@ FOCUS_MUNICIPALITIES = [
   {"n":"Sevilla",             "d":"Valle del Cauca","lat":4.2681,"lng":-75.9347,"a":"Redes criminales"},
   {"n":"Caicedonia",          "d":"Valle del Cauca","lat":4.3339,"lng":-75.8331,"a":"Redes criminales"},
   {"n":"Zarzal",              "d":"Valle del Cauca","lat":4.3942,"lng":-76.0708,"a":"AGC / redes criminales"},
-  {"n":"La Union",    "d":"Valle del Cauca","lat":4.5300,"lng":-76.1000,"a":"Redes criminales"},
+  {"n":"La Union",            "d":"Valle del Cauca","lat":4.5300,"lng":-76.1000,"a":"Redes criminales"},
   {"n":"Roldanillo",          "d":"Valle del Cauca","lat":4.4150,"lng":-76.1569,"a":"AGC Clan del Golfo / redes criminales"},
   {"n":"Toro",                "d":"Valle del Cauca","lat":4.6020,"lng":-76.0820,"a":"AGC Clan del Golfo / FARC-EMC Frente Jaime Martinez"},
   {"n":"Versalles",           "d":"Valle del Cauca","lat":4.5700,"lng":-76.2400,"a":"FARC-EMC / redes criminales"},
@@ -320,7 +302,7 @@ FOCUS_MUNICIPALITIES = [
   {"n":"Calima",              "d":"Valle del Cauca","lat":3.9300,"lng":-76.4800,"a":"FARC-EMC / redes criminales"},
   {"n":"Riofrio",             "d":"Valle del Cauca","lat":4.1200,"lng":-76.3600,"a":"FARC-EMC / redes criminales"},
   {"n":"Trujillo",            "d":"Valle del Cauca","lat":4.2300,"lng":-76.3200,"a":"FARC-EMC / redes criminales"},
-  {"n":"Bolivar",     "d":"Valle del Cauca","lat":4.3700,"lng":-76.2300,"a":"FARC-EMC Segunda Marquetalia"},
+  {"n":"Bolivar",             "d":"Valle del Cauca","lat":4.3700,"lng":-76.2300,"a":"FARC-EMC Segunda Marquetalia"},
   {"n":"El Dovio",            "d":"Valle del Cauca","lat":4.5200,"lng":-76.2900,"a":"FARC-EMC / redes criminales"},
   {"n":"Ansermanuevo",        "d":"Valle del Cauca","lat":4.7939,"lng":-76.0311,"a":"AGC Clan del Golfo / redes criminales"},
   {"n":"El Aguila",           "d":"Valle del Cauca","lat":4.9200,"lng":-76.0600,"a":"AGC Clan del Golfo / redes criminales"},
@@ -338,7 +320,7 @@ FOCUS_MUNICIPALITIES = [
   {"n":"El Charco",           "d":"Narino","lat":2.4806,"lng":-77.9889,"a":"FARC-EMC / Segunda Marquetalia"},
   {"n":"La Tola",             "d":"Narino","lat":2.9822,"lng":-78.2258,"a":"FARC-EMC / Segunda Marquetalia — costa norte Narino"},
   {"n":"Iscuande",            "d":"Narino","lat":2.4444,"lng":-77.9786,"a":"FARC-EMC / Segunda Marquetalia"},
-  {"n":"Mosquera",   "d":"Narino","lat":2.5100,"lng":-78.4300,"a":"FARC-EMC Segunda Marquetalia"},
+  {"n":"Mosquera",            "d":"Narino","lat":2.5100,"lng":-78.4300,"a":"FARC-EMC Segunda Marquetalia"},
   {"n":"Francisco Pizarro",   "d":"Narino","lat":1.1750,"lng":-78.7300,"a":"FARC-EMC Columna Daniel Aldana — costa norte"},
   {"n":"Ipiales",             "d":"Narino","lat":0.8294,"lng":-77.6441,"a":"FARC-EMC / Los Lobos Ecuador — zona fronteriza Ecuador"},
   {"n":"Cumbal",              "d":"Narino","lat":0.9139,"lng":-77.7892,"a":"FARC-EMC Frente 29 — resguardos indigenas frontera Ecuador"},
@@ -348,14 +330,14 @@ FOCUS_MUNICIPALITIES = [
   {"n":"Ricaurte",            "d":"Narino","lat":1.2119,"lng":-77.9844,"a":"FARC-EMC Frente 29 — corredor fronterizo Ecuador"},
   {"n":"Mallama",             "d":"Narino","lat":1.0300,"lng":-77.9700,"a":"FARC-EMC Frente 29"},
   {"n":"Samaniego",           "d":"Narino","lat":1.3444,"lng":-77.5944,"a":"FARC-EMC Columna Comuneros del Sur — epicentro Corregimiento La Albania"},
-  {"n":"Los Andes",  "d":"Narino","lat":1.4900,"lng":-77.5300,"a":"FARC-EMC Columna Comuneros del Sur"},
+  {"n":"Los Andes",           "d":"Narino","lat":1.4900,"lng":-77.5300,"a":"FARC-EMC Columna Comuneros del Sur"},
   {"n":"Linares",             "d":"Narino","lat":1.3700,"lng":-77.4600,"a":"FARC-EMC Columna Comuneros del Sur"},
   {"n":"Ancuya",              "d":"Narino","lat":1.4200,"lng":-77.4200,"a":"FARC-EMC Columna Comuneros del Sur"},
   {"n":"El Rosario",          "d":"Narino","lat":1.5900,"lng":-77.4800,"a":"FARC-EMC Columna Comuneros del Sur"},
   {"n":"Policarpa",           "d":"Narino","lat":1.7500,"lng":-77.4500,"a":"FARC-EMC Columna Comuneros del Sur"},
   {"n":"Cumbitara",           "d":"Narino","lat":1.6600,"lng":-77.5700,"a":"FARC-EMC Columna Comuneros del Sur"},
   {"n":"La Llanada",          "d":"Narino","lat":1.5100,"lng":-77.5700,"a":"FARC-EMC"},
-  {"n":"El Tablon",  "d":"Narino","lat":1.4200,"lng":-76.8900,"a":"FARC-EMC"},
+  {"n":"El Tablon",           "d":"Narino","lat":1.4200,"lng":-76.8900,"a":"FARC-EMC"},
   {"n":"Leiva",               "d":"Narino","lat":1.5781,"lng":-77.3494,"a":"FARC-EMC Columna Comuneros del Sur"},
   {"n":"Tuquerres",           "d":"Narino","lat":1.0850,"lng":-77.6200,"a":"FARC-EMC Frente 29 — zona andina"},
   {"n":"Guachucal",           "d":"Narino","lat":0.9800,"lng":-77.6900,"a":"FARC-EMC — resguardos indigenas frontera Ecuador"},
@@ -371,21 +353,72 @@ FOCUS_MUNICIPALITIES = [
   {"n":"Consaca",             "d":"Narino","lat":1.2500,"lng":-77.4600,"a":"FARC-EMC (zona de influencia)"},
   {"n":"Chachagui",           "d":"Narino","lat":1.3600,"lng":-77.2800,"a":"Redes criminales (influencia)"},
   {"n":"Buesaco",             "d":"Narino","lat":1.3800,"lng":-77.1600,"a":"FARC-EMC / Segunda Marquetalia"},
-  {"n":"San Bernardo", "d":"Narino","lat":1.5100,"lng":-76.9700,"a":"FARC-EMC Segunda Marquetalia"},
+  {"n":"San Bernardo",        "d":"Narino","lat":1.5100,"lng":-76.9700,"a":"FARC-EMC Segunda Marquetalia"},
   {"n":"La Cruz",             "d":"Narino","lat":1.5900,"lng":-76.9700,"a":"FARC-EMC Segunda Marquetalia"},
   {"n":"Alban",               "d":"Narino","lat":1.4500,"lng":-77.4000,"a":"FARC-EMC (influencia)"},
   {"n":"Taminango",           "d":"Narino","lat":1.5700,"lng":-77.2700,"a":"FARC-EMC"},
   {"n":"Arboleda",            "d":"Narino","lat":1.6500,"lng":-77.0900,"a":"FARC-EMC / Segunda Marquetalia"},
-  {"n":"San Pablo",  "d":"Narino","lat":1.6900,"lng":-76.9600,"a":"FARC-EMC Segunda Marquetalia"},
-  {"n":"Colon",      "d":"Narino","lat":1.4800,"lng":-76.9500,"a":"FARC-EMC Segunda Marquetalia"},
-  {"n":"Providencia",  "d":"Narino","lat":1.5400,"lng":-76.9000,"a":"FARC-EMC"},
-  {"n":"Belen",      "d":"Narino","lat":1.5900,"lng":-76.8500,"a":"FARC-EMC"},
+  {"n":"San Pablo",           "d":"Narino","lat":1.6900,"lng":-76.9600,"a":"FARC-EMC Segunda Marquetalia"},
+  {"n":"Colon",               "d":"Narino","lat":1.4800,"lng":-76.9500,"a":"FARC-EMC Segunda Marquetalia"},
+  {"n":"Providencia",         "d":"Narino","lat":1.5400,"lng":-76.9000,"a":"FARC-EMC"},
+  {"n":"Belen",               "d":"Narino","lat":1.5900,"lng":-76.8500,"a":"FARC-EMC"},
 ]
 
-# Email
+# ── SMART DEDUPLICATION ───────────────────────────────────────────────────────
+# Find names that exist in multiple departments (requires name+dept key).
+# All other names (99%) use name-only key so AI dept variations never cause duplicates.
+_name_dept_check: dict = {}
+for _src_list in (GREEN_BASELINE, FOCUS_MUNICIPALITIES):
+    for _m in _src_list:
+        _nn = normalize_name(_m['n'])
+        _name_dept_check.setdefault(_nn, set()).add(normalize_name(_m['d']))
+AMBIGUOUS_NAMES = frozenset(n for n, ds in _name_dept_check.items() if len(ds) > 1)
+# Result: {'bolivar'} — only Bolivar appears in both Cauca and Valle del Cauca
+
+def smart_muni_key(name: str, dept: str = '') -> str:
+    """
+    One circle per municipality — name-only key for 99% of cases.
+    Only uses name|dept for genuinely ambiguous names (e.g. 'Bolivar').
+
+    This means if the AI returns Totoro with d='' or d='Cauca, Colombia',
+    it still resolves to the same key as the seeded entry and merges correctly.
+    """
+    nname = normalize_name(name)
+    if nname in AMBIGUOUS_NAMES:
+        return nname + '|' + normalize_name(dept)
+    return nname
+
+# ── API RETRY ─────────────────────────────────────────────────────────────────
+def call_with_retry(client, **kwargs):
+    """
+    Retry client.messages.create() on 529 Overloaded errors.
+    Waits 30s → 60s → 120s before each retry (4 attempts total).
+    On permanent failure, returns None so the script saves existing data
+    instead of crashing with exit code 1.
+    """
+    for attempt in range(4):
+        try:
+            return client.messages.create(**kwargs)
+        except Exception as e:
+            is_overloaded = (
+                '529' in str(e) or
+                'overloaded' in str(e).lower() or
+                getattr(e, 'status_code', 0) == 529
+            )
+            if is_overloaded and attempt < 3:
+                wait = 30 * (2 ** attempt)  # 30 → 60 → 120 seconds
+                print(f"  API sobrecargada (529) — esperando {wait}s "
+                      f"(intento {attempt + 1}/4)...")
+                time.sleep(wait)
+            else:
+                print(f"  Error API: {e}")
+                return None  # caller handles gracefully
+    return None
+
+# ── EMAIL ─────────────────────────────────────────────────────────────────────
 def build_email(fecha, before, after, counts):
     escalated=[]; deescalated=[]; nuevos=[]; auto_rojos=[]
-    order={'green':0,'yellow':1,'orange':2,'red':3}
+    order={'green':0,'yellow':1,'orange':2,'red':3,'white':0}
     for name,m in after.items():
         nz=m.get('r','green')
         if m.get('auto_red'):
@@ -557,7 +590,7 @@ def run():
 
     html = HTML_FILE.read_text(encoding='utf-8')
 
-    # Load existing municipalities
+    # Load existing municipalities — re-key with smart_muni_key to fix any old-format keys
     existing_munis = []
     em = re.search(r'const MUNIS = \[(.*?)\];', html, re.DOTALL)
     if em:
@@ -567,49 +600,62 @@ def run():
         except Exception as e:
             print(f"No se pudo leer MUNIS: {e}")
 
-    by_name = {muni_key(m['n'], m.get('d','')): m for m in existing_munis}
-    before  = {k: dict(v) for k,v in by_name.items()}
-
-    # Seed GREEN baseline (rest of country)
-    for g in GREEN_BASELINE:
-        if muni_key(g['n'], g['d']) not in by_name:
-            by_name[muni_key(g['n'], g['d'])] = make_green(g, today)
-
-    # Seed ALL focus department municipalities (Cauca/Valle/Narino)
-    for f in FOCUS_MUNICIPALITIES:
-        nkey = muni_key(f['n'], f['d'])
-        if nkey not in by_name:
-            by_name[nkey] = make_focus_muni(f, today)
+    # Use smart_muni_key — collapses any old name|dept duplicates on load
+    by_name: dict = {}
+    for m in existing_munis:
+        k = smart_muni_key(m.get('n',''), m.get('d',''))
+        if k not in by_name:
+            by_name[k] = m
         else:
-            # Mark existing ones as focus dept and update structure info
-            by_name[nkey]['focus_dept'] = True
-            if not by_name[nkey].get('a') or by_name[nkey]['a'] == 'N/A - monitoreo rutinario':
-                by_name[nkey]['a'] = f.get('a','')
+            # On collision keep the higher-risk entry
+            existing = by_name[k]
+            if m.get('adjusted_score', 0) > existing.get('adjusted_score', 0):
+                by_name[k] = m
+
+    before = {k: dict(v) for k, v in by_name.items()}
+
+    # Seed GREEN baseline
+    for g in GREEN_BASELINE:
+        k = smart_muni_key(g['n'], g['d'])
+        if k not in by_name:
+            by_name[k] = make_green(g, today)
+
+    # Seed ALL focus department municipalities
+    for f in FOCUS_MUNICIPALITIES:
+        k = smart_muni_key(f['n'], f['d'])
+        if k not in by_name:
+            by_name[k] = make_focus_muni(f, today)
+        else:
+            by_name[k]['focus_dept'] = True
+            if not by_name[k].get('a') or by_name[k]['a'] == 'N/A - monitoreo rutinario':
+                by_name[k]['a'] = f.get('a', '')
+            # Always use canonical coordinates from our seed data
+            by_name[k]['lat'] = f['lat']
+            by_name[k]['lng'] = f['lng']
+
     print(f"  Focus depts seeded: {len(FOCUS_MUNICIPALITIES)} municipios (Cauca/Valle del Cauca/Narino)")
 
-    # Step 0: Migrate old-format municipalities to new dated events format
+    # Step 0: Migrate old ev_pts format
     migrated = 0
-    for _mkey in list(by_name.keys()):
-        m = by_name[_mkey]
+    for k in list(by_name.keys()):
+        m = by_name[k]
         if 'events' not in m and m.get('ev_pts'):
-            by_name[_mkey] = migrate_if_needed(m, today)
+            by_name[k] = migrate_if_needed(m, today)
             migrated += 1
     if migrated:
         print(f"  Migrado: {migrated} municipios de formato antiguo a nuevo")
 
-    # Step 1: Expire old events FIRST - before AI search
-    for _mkey in list(by_name.keys()):
-        _mname    = by_name[_mkey].get('n', _mkey)
-        old_zone  = by_name[_mkey].get('r','green')
-        old_count = len(by_name[_mkey].get('events',[]))
-        by_name[_mkey] = recalculate(by_name[_mkey], today)
-        new_count = len(by_name[_mkey].get('events',[]))
+    # Step 1: Expire old events
+    for k in list(by_name.keys()):
+        mname     = by_name[k].get('n', k)
+        old_zone  = by_name[k].get('r', 'green')
+        old_count = len(by_name[k].get('events', []))
+        by_name[k] = recalculate(by_name[k], today)
+        new_count = len(by_name[k].get('events', []))
         if old_count != new_count:
-            print(f"  Expirado: {_mname} — {old_count-new_count} evento(s) | {old_zone} -> {by_name[_mkey].get('r','')}")
+            print(f"  Expirado: {mname} — {old_count-new_count} evento(s) | {old_zone} -> {by_name[k].get('r','')}")
 
-    # Step 2: AI search — only return municipalities WHERE EVENTS WERE FOUND.
-    # Focus dept municipalities are already seeded as white/green — no need to list empties.
-    # Keeping output small avoids token limits and streaming complexity.
+    # Step 2: AI search
     client = anthropic.Anthropic(api_key=API_KEY)
     user_msg = (
         f"Hoy es {fecha}. Busca eventos de conflicto armado en Colombia "
@@ -624,43 +670,48 @@ def run():
         f"Maximo 5 eventos por municipio. Campo i maximo 60 chars. TODO en ESPANOL. "
         f"Devuelve SOLO JSON valido comenzando con {{ terminando con }}."
     )
-    resp = client.messages.create(
-        model="claude-sonnet-4-6",
+
+    resp = call_with_retry(
+        client,
+        model="claude-sonnet-4-20250514",
         max_tokens=8000,
         system=SYSTEM,
         messages=[{"role": "user", "content": user_msg}],
         tools=[{"type": "web_search_20250305", "name": "web_search"}]
     )
 
+    if resp is None:
+        print("Sin respuesta de la API — guardando datos con eventos expirados")
+        HTML_FILE.write_text(write_html(html, by_name, fecha), encoding='utf-8')
+        return
+
     text = "".join(b.text for b in resp.content if b.type == "text")
     print(f"Respuesta IA: {len(text)} caracteres, bloques: {len(resp.content)}")
     if not text:
-        print("Sin respuesta IA - guardando datos con eventos expirados")
-        HTML_FILE.write_text(write_html(html,by_name,fecha),encoding='utf-8')
+        print("Sin respuesta IA — guardando datos con eventos expirados")
+        HTML_FILE.write_text(write_html(html, by_name, fecha), encoding='utf-8')
         return
 
-    j0=text.find('{'); j1=text.rfind('}')
-    if j0==-1 or j1==-1:
-        print("Sin JSON - guardando datos con eventos expirados")
-        HTML_FILE.write_text(write_html(html,by_name,fecha),encoding='utf-8')
+    j0 = text.find('{'); j1 = text.rfind('}')
+    if j0 == -1 or j1 == -1:
+        print("Sin JSON — guardando datos con eventos expirados")
+        HTML_FILE.write_text(write_html(html, by_name, fecha), encoding='utf-8')
         return
 
-    raw = text[j0:j1+1]
+    raw  = text[j0:j1+1]
     data = None
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
         print(f"JSON truncado en caracter {e.pos} — intentando recuperar municipios completos...")
-        # Salvage: truncate at error, find last complete municipality object
-        truncated = raw[:e.pos]
+        truncated  = raw[:e.pos]
         last_brace = truncated.rfind('}')
         if last_brace > 0:
             fecha_m = re.search(r'"fecha"\s*:\s*"([^"]+)"', truncated)
             fecha_from_json = fecha_m.group(1) if fecha_m else ''
-            mun_m = re.search(r'"municipios"\s*:\s*\[', truncated)
-            if mun_m:
+            if re.search(r'"municipios"\s*:\s*\[', truncated):
                 try:
-                    salvaged = truncated[:last_brace+1] + ']}' 
+                    salvaged = truncated[:last_brace+1] + ']}'
                     data = json.loads(salvaged)
                     if fecha_from_json:
                         data['fecha'] = fecha_from_json
@@ -668,53 +719,56 @@ def run():
                 except json.JSONDecodeError:
                     pass
         if data is None:
-            print("No se pudo recuperar JSON - guardando datos con eventos expirados")
-            HTML_FILE.write_text(write_html(html,by_name,fecha),encoding='utf-8')
+            print("No se pudo recuperar JSON — guardando datos con eventos expirados")
+            HTML_FILE.write_text(write_html(html, by_name, fecha), encoding='utf-8')
             return
 
     if not data.get('municipios'):
-        HTML_FILE.write_text(write_html(html,by_name,fecha),encoding='utf-8')
+        HTML_FILE.write_text(write_html(html, by_name, fecha), encoding='utf-8')
         return
 
-    # Step 3: Merge AI events with existing dated events
-    print(f"IA devolvio {len(data['municipios'])} municipios - fusionando con historial...")
-    updated=added=0
+    # Step 3: Merge AI events — one entry per municipality guaranteed by smart_muni_key
+    print(f"IA devolvio {len(data['municipios'])} municipios — fusionando con historial...")
+    updated = added = 0
 
     for ai_m in data['municipios']:
-        name      = ai_m.get('n','')
-        nkey      = muni_key(name, ai_m.get('d',''))
-        ai_events = ai_m.get('events',[])
+        name      = ai_m.get('n', '')
+        ai_dept   = ai_m.get('d', '')
+        nkey      = smart_muni_key(name, ai_dept)
+        ai_events = ai_m.get('events', [])
 
         if ai_m.get('auto_red') and not ai_m.get('auto_red_date'):
-            ai_m['auto_red_date'] = ai_events[0].get('date',str(today)) if ai_events else str(today)
+            ai_m['auto_red_date'] = ai_events[0].get('date', str(today)) if ai_events else str(today)
 
         if nkey in by_name:
             ex = by_name[nkey]
-            ex['events'] = merge_events(ex.get('events',[]), ai_events, today)
-            ex['i'] = ai_m.get('i', ex.get('i',''))
-            ex['a'] = ai_m.get('a', ex.get('a',''))
+            ex['events'] = merge_events(ex.get('events', []), ai_events, today)
+            ex['i'] = ai_m.get('i', ex.get('i', ''))
+            ex['a'] = ai_m.get('a', ex.get('a', ''))
             if ai_m.get('auto_red'):
                 ex['auto_red']      = True
-                ex['auto_red_why']  = ai_m.get('auto_red_why','')
-                ex['auto_red_date'] = ai_m.get('auto_red_date',str(today))
+                ex['auto_red_why']  = ai_m.get('auto_red_why', '')
+                ex['auto_red_date'] = ai_m.get('auto_red_date', str(today))
             by_name[nkey] = recalculate(ex, today)
             updated += 1
         else:
+            # New municipality not in our seed list — add it
             by_name[nkey] = recalculate(ai_m, today)
             added += 1
 
     merged = list(by_name.values())
-    counts = {r: sum(1 for x in merged if x.get('r')==r)
-              for r in ('red','orange','yellow','green')}
+    counts = {r: sum(1 for x in merged if x.get('r') == r)
+              for r in ('red','orange','yellow','green','white')}
     print(f"Actualizado:{updated} Nuevo:{added} Total:{len(merged)}")
     if updated == 0 and added == 0:
         print("AVISO: Ningun municipio actualizado — verifica que el JSON de la IA tenga datos")
-    print(f"ROJO={counts['red']} NARANJA={counts['orange']} AMARILLO={counts['yellow']} VERDE={counts['green']}")
+    print(f"ROJO={counts['red']} NARANJA={counts['orange']} AMARILLO={counts['yellow']} "
+          f"VERDE={counts['green']} BLANCO={counts['white']}")
 
-    HTML_FILE.write_text(write_html(html,by_name,data.get('fecha',fecha)),encoding='utf-8')
-    print(f"EXITO: index.html actualizado - {fecha}")
+    HTML_FILE.write_text(write_html(html, by_name, data.get('fecha', fecha)), encoding='utf-8')
+    print(f"EXITO: index.html actualizado — {fecha}")
 
-    after = {m['n']:m for m in merged}
+    after = {m['n']: m for m in merged}
     send_email(fecha, before, after, counts)
 
 if __name__ == "__main__":
