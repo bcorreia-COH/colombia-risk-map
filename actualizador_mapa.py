@@ -600,7 +600,7 @@ def run():
     client = anthropic.Anthropic(api_key=API_KEY)
     resp = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=16000,
+        max_tokens=32000,
         system=SYSTEM,
         messages=[{"role":"user","content":
             f"Hoy es {fecha}. Busca SISTEMATICAMENTE eventos de seguridad y conflicto armado "
@@ -633,12 +633,32 @@ def run():
         HTML_FILE.write_text(write_html(html,by_name,fecha),encoding='utf-8')
         return
 
+    raw = text[j0:j1+1]
+    data = None
     try:
-        data = json.loads(text[j0:j1+1])
+        data = json.loads(raw)
     except json.JSONDecodeError as e:
-        print(f"Error JSON: {e} - guardando datos con eventos expirados")
-        HTML_FILE.write_text(write_html(html,by_name,fecha),encoding='utf-8')
-        return
+        print(f"JSON truncado en caracter {e.pos} — intentando recuperar municipios completos...")
+        # Salvage: truncate at error, find last complete municipality object
+        truncated = raw[:e.pos]
+        last_brace = truncated.rfind('}')
+        if last_brace > 0:
+            fecha_m = re.search(r'"fecha"\s*:\s*"([^"]+)"', truncated)
+            fecha_from_json = fecha_m.group(1) if fecha_m else ''
+            mun_m = re.search(r'"municipios"\s*:\s*\[', truncated)
+            if mun_m:
+                try:
+                    salvaged = truncated[:last_brace+1] + ']}' 
+                    data = json.loads(salvaged)
+                    if fecha_from_json:
+                        data['fecha'] = fecha_from_json
+                    print(f"Recuperados {len(data.get('municipios',[]))} municipios del JSON truncado")
+                except json.JSONDecodeError:
+                    pass
+        if data is None:
+            print("No se pudo recuperar JSON - guardando datos con eventos expirados")
+            HTML_FILE.write_text(write_html(html,by_name,fecha),encoding='utf-8')
+            return
 
     if not data.get('municipios'):
         HTML_FILE.write_text(write_html(html,by_name,fecha),encoding='utf-8')
