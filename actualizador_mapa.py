@@ -79,6 +79,31 @@ def merge_events(existing, new_events, today):
             existing_keys.add(k)
     return merged
 
+
+def migrate_if_needed(m, today):
+    """
+    Convert municipality from old ev_pts format to new dated events format.
+    Old: ev_pts=[10,5,4], ev_count=3, adjusted_score=21
+    New: events=[{date, pts, desc}, ...]
+    Uses synthetic date of today-14 to keep events active for one more cycle
+    while the AI confirms with proper occurrence dates.
+    """
+    if 'events' in m:
+        return m  # Already in new format
+    ev_pts = m.get('ev_pts', [])
+    if not ev_pts:
+        m['events'] = []
+        return m
+    # Synthetic date: 14 days ago keeps them active for 16 more days
+    syn_date = str(today - timedelta(days=14))
+    m['events'] = [
+        {"date": syn_date, "pts": p, "desc": "Evento historico (migracion de formato)"}
+        for p in ev_pts
+    ]
+    if m.get('auto_red') and not m.get('auto_red_date'):
+        m['auto_red_date'] = syn_date
+    return m
+
 def recalculate(m, today):
     dept = m.get('d','').lower()
     name = m.get('n','').lower()
@@ -333,6 +358,16 @@ def run():
     for g in GREEN_BASELINE:
         if g['n'] not in by_name:
             by_name[g['n']] = make_green(g, today)
+
+    # Step 0: Migrate old-format municipalities to new dated events format
+    migrated = 0
+    for name in list(by_name.keys()):
+        m = by_name[name]
+        if 'events' not in m and m.get('ev_pts'):
+            by_name[name] = migrate_if_needed(m, today)
+            migrated += 1
+    if migrated:
+        print(f"  Migrado: {migrated} municipios de formato antiguo a nuevo")
 
     # Step 1: Expire old events FIRST - before AI search
     for name in list(by_name.keys()):
