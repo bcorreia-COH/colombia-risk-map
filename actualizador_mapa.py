@@ -597,31 +597,35 @@ def run():
                   f"| zona: {old_zone} -> {by_name[name].get('r','')}")
 
     # Step 2: AI search for new events
+    # Use streaming — required when max_tokens > threshold (avoids 10-min timeout error)
     client = anthropic.Anthropic(api_key=API_KEY)
-    resp = client.messages.create(
+    user_msg = (
+        f"Hoy es {fecha}. Busca SISTEMATICAMENTE eventos de seguridad y conflicto armado "
+        f"en Colombia de los ultimos 60 dias ({str(today - timedelta(days=60))} al {fecha}). "
+        f"Para Cauca, Valle del Cauca y Narino busca hasta 60 dias atras. "
+        f"Para el resto del pais busca los ultimos 30 dias ({inicio} al {fecha}). "
+        f"Fuentes: Indepaz, ACLED, OCHA, Crisis Group, Defensoria del Pueblo Colombia, "
+        f"El Tiempo, El Colombiano, El Espectador, W Radio, Semana, Caracol, RCN. "
+        f"CRITICO: Usa la fecha REAL de cada evento (YYYY-MM-DD), no la fecha de hoy. "
+        f"Busca evento por evento, municipio por municipio, en los departamentos "
+        f"mas afectados: Cauca, Narino, Valle del Cauca, Antioquia, Choco, "
+        f"Norte de Santander, Arauca, Putumayo, Caqueta, Huila, Tolima. "
+        f"Para cada municipio en la lista prioritaria, verifica si hubo eventos "
+        f"en los ultimos 30 dias y registra cada uno por separado con su fecha exacta. "
+        f"Incluye municipios estables sin eventos (events=[]). "
+        f"Entre 70 y 85 municipios total. Campo i maximo 90 chars. TODO en ESPANOL. "
+        f"Devuelve SOLO JSON valido comenzando con {{ terminando con }}."
+    )
+    with client.messages.stream(
         model="claude-sonnet-4-6",
         max_tokens=32000,
         system=SYSTEM,
-        messages=[{"role":"user","content":
-            f"Hoy es {fecha}. Busca SISTEMATICAMENTE eventos de seguridad y conflicto armado "
-            f"en Colombia de los ultimos 60 dias ({str(today - timedelta(days=60))} al {fecha}). "
-            f"Para Cauca, Valle del Cauca y Narino busca hasta 60 dias atras. "
-            f"Para el resto del pais busca los ultimos 30 dias ({inicio} al {fecha}). "
-            f"Fuentes: Indepaz, ACLED, OCHA, Crisis Group, Defensoria del Pueblo Colombia, "
-            f"El Tiempo, El Colombiano, El Espectador, W Radio, Semana, Caracol, RCN. "
-            f"CRITICO: Usa la fecha REAL de cada evento (YYYY-MM-DD), no la fecha de hoy. "
-            f"Busca evento por evento, municipio por municipio, en los departamentos "
-            f"mas afectados: Cauca, Narino, Valle del Cauca, Antioquia, Choco, "
-            f"Norte de Santander, Arauca, Putumayo, Caqueta, Huila, Tolima. "
-            f"Para cada municipio en la lista prioritaria, verifica si hubo eventos "
-            f"en los ultimos 30 dias y registra cada uno por separado con su fecha exacta. "
-            f"Incluye municipios estables sin eventos (events=[]). "
-            f"Entre 70 y 85 municipios total. Campo i maximo 90 chars. TODO en ESPANOL. "
-            f"Devuelve SOLO JSON valido comenzando con {{ terminando con }}."}],
-        tools=[{"type":"web_search_20250305","name":"web_search"}]
-    )
+        messages=[{"role": "user", "content": user_msg}],
+        tools=[{"type": "web_search_20250305", "name": "web_search"}]
+    ) as stream:
+        resp = stream.get_final_message()
 
-    text = "".join(b.text for b in resp.content if b.type=="text")
+    text = "".join(b.text for b in resp.content if b.type == "text")
     if not text:
         print("Sin respuesta IA - guardando datos con eventos expirados")
         HTML_FILE.write_text(write_html(html,by_name,fecha),encoding='utf-8')
